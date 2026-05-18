@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import CatalogMaker from "../catalog_maker";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Dashboard" },
   { id: "orders", label: "Orders" },
   { id: "history", label: "History" },
   { id: "logs", label: "Logs" },
+  { id: "catalog", label: "Catalog" },
   { id: "imports", label: "Import" },
 ];
 
@@ -17,6 +19,7 @@ function emptyFormState() {
     code: "",
     name: "",
     category: "",
+    catalogUnit: "1 pcs",
     stockQuantity: "",
     unitPriceInr: "",
     imageUrl: "",
@@ -311,6 +314,12 @@ function ProductModal({
     { key: "code", label: "Product Code", type: "text", placeholder: "Product Code" },
     { key: "category", label: "Category", type: "text", placeholder: "Category" },
     {
+      key: "catalogUnit",
+      label: "Catalog Qty Label",
+      type: "text",
+      placeholder: "1 pcs",
+    },
+    {
       key: "unitPriceInr",
       label: "Price in INR",
       type: "number",
@@ -464,6 +473,10 @@ export default function AdminInventoryManager({
       return "log";
     }
 
+    if (itemId === "catalog") {
+      return "pdf";
+    }
+
     if (itemId === "imports") {
       return "xls";
     }
@@ -504,6 +517,7 @@ export default function AdminInventoryManager({
       code: product.code,
       name: product.name,
       category: product.category,
+      catalogUnit: product.catalogUnit || "1 pcs",
       stockQuantity: String(product.stockQuantity),
       unitPriceInr: String(product.unitPriceInr),
       imageUrl: product.imageUrl,
@@ -527,6 +541,7 @@ export default function AdminInventoryManager({
       code: form.code,
       name: form.name,
       category: form.category,
+      catalogUnit: form.catalogUnit,
       stockQuantity: Number(form.stockQuantity),
       unitPriceInr: Number(form.unitPriceInr),
       imageUrl: form.imageUrl,
@@ -602,6 +617,16 @@ export default function AdminInventoryManager({
         code: item.code || item.Code || `ITEM-${index + 1}`,
         name: item.name || item.Name || "Unnamed Product",
         category: item.category || item.Category || "General",
+        catalogUnit:
+          item.catalogUnit ||
+          item.CatalogUnit ||
+          item.catalogQtyLabel ||
+          item.CatalogQtyLabel ||
+          item.qtyLabel ||
+          item.QtyLabel ||
+          item.pack ||
+          item.Pack ||
+          "1 pcs",
         stockQuantity: Number(item.stockQuantity || item.stock || item.StockQuantity || item.Stock || 0),
         unitPriceInr: Number(item.unitPriceInr || item.price || item.Price || 0),
         imageUrl:
@@ -701,8 +726,29 @@ export default function AdminInventoryManager({
 
   return (
     <div className="min-h-screen bg-[#120d09] text-white">
-      <main className="px-5 py-6 md:px-8 md:py-8">
-        <header className="mb-8 rounded-[2rem] border border-white/10 bg-[#1a130f]/90 p-4 shadow-2xl backdrop-blur">
+      <style jsx global>{`
+        @media print {
+          .admin-print-hidden {
+            display: none !important;
+          }
+
+          .admin-print-catalog-only {
+            padding: 0 !important;
+            background: white !important;
+          }
+        }
+      `}</style>
+
+      <main
+        className={`px-5 py-6 md:px-8 md:py-8 ${
+          activeSection === "catalog" ? "admin-print-catalog-only" : ""
+        }`}
+      >
+        <header
+          className={`mb-8 rounded-[2rem] border border-white/10 bg-[#1a130f]/90 p-4 shadow-2xl backdrop-blur ${
+            activeSection === "catalog" ? "admin-print-hidden" : ""
+          }`}
+        >
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-8">
               <div className="min-w-0">
@@ -743,6 +789,11 @@ export default function AdminInventoryManager({
                         return;
                       }
 
+                      if (item.id === "catalog") {
+                        router.push("/admin/catalog");
+                        return;
+                      }
+
                       if (item.id === "imports") {
                         router.push("/admin/imports");
                       }
@@ -763,25 +814,6 @@ export default function AdminInventoryManager({
             </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <input
-                type="text"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search product code or item..."
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-orange-400 lg:w-72"
-              />
-              <select
-                value={selectedCategory}
-                onChange={(event) => setSelectedCategory(event.target.value)}
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-400"
-              >
-                <option className="text-black">All Categories</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.name} className="text-black">
-                    {category.name}
-                  </option>
-                ))}
-              </select>
               <button
                 type="button"
                 onClick={handleLogout}
@@ -829,7 +861,7 @@ export default function AdminInventoryManager({
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={openCreateModal}
@@ -837,6 +869,25 @@ export default function AdminInventoryManager({
                     >
                       Add Product
                     </button>
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search product code or item..."
+                      className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-orange-400 md:w-72"
+                    />
+                    <select
+                      value={selectedCategory}
+                      onChange={(event) => setSelectedCategory(event.target.value)}
+                      className="rounded-2xl border border-stone-200 px-4 py-3 text-stone-900 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    >
+                      <option>All Categories</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.name}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
                       onClick={() => router.push("/admin/history")}
@@ -1133,7 +1184,7 @@ export default function AdminInventoryManager({
                   className="mt-4 block w-full text-sm"
                 />
                 <p className="mt-3 text-sm text-gray-500">
-                  Supported columns: Code, Name, Category, Stock, Price, Image.
+                  Supported columns: Code, Name, Category, CatalogUnit, Stock, Price, Image.
                 </p>
                 {error ? (
                   <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -1142,6 +1193,14 @@ export default function AdminInventoryManager({
                 ) : null}
               </div>
             </section>
+        ) : null}
+
+        {activeSection === "catalog" ? (
+          <CatalogMaker
+            products={products}
+            categories={categories}
+            initialTitle="Crockery Product Catalog"
+          />
         ) : null}
       </main>
 

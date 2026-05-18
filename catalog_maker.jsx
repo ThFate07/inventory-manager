@@ -1,0 +1,614 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+function buildCatalogProduct(product) {
+  return {
+    id: product.id,
+    image: product.imageUrl || null,
+    price: String(Number(product.unitPriceInr) || ""),
+    qty: product.catalogUnit || "",
+    inStock: Number(product.stockQuantity) > 0,
+    description: product.name || "",
+    details: "",
+    sku: product.code || "",
+  };
+}
+
+function CatalogCard({ product, selected, onToggle }) {
+  const descriptionText = [product.description, product.details].filter(Boolean).join(" ");
+
+  return (
+    <div
+      className="catalog-card"
+      style={{
+        border: "1px solid #ccc",
+        backgroundColor: "#fff",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        fontFamily: "'Arial', sans-serif",
+        fontSize: "12px",
+        minHeight: "164px",
+      }}
+    >
+      <label
+        className="no-print"
+        style={{
+          position: "absolute",
+          top: "4px",
+          right: "4px",
+          zIndex: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+          background: "rgba(255,255,255,0.96)",
+          borderRadius: "999px",
+          padding: "3px 8px",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+          fontSize: "10px",
+          fontWeight: "700",
+          color: "#444",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggle(product.id)}
+          style={{ accentColor: "#f97316" }}
+        />
+        Include
+      </label>
+
+      <div
+        style={{
+          height: "130px",
+          backgroundColor: "#f5f5f5",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          padding: "4px",
+          margin: "0 4px",
+          border: "1px solid #e0e0e0",
+        }}
+      >
+        {product.image ? (
+          <img
+            src={product.image}
+            alt={product.sku}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              display: "block",
+              background: "#fff",
+            }}
+          />
+        ) : (
+          <div style={{ color: "#b3b3b3", fontSize: "11px", textAlign: "center", padding: "8px" }}>
+            <div style={{ fontSize: "22px", marginBottom: "4px" }}>🖼️</div>
+            No Image
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          padding: "4px 6px 2px",
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto",
+          alignItems: "center",
+          columnGap: "6px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: "3px" }}>
+          <span style={{ color: "#cc0000", fontWeight: "bold", fontSize: "14px" }}>Rs</span>
+          <span style={{ color: "#cc0000", fontWeight: "900", fontSize: "16px" }}>
+            {product.price || "—"}
+          </span>
+        </div>
+        <span style={{ color: "#000", fontWeight: "bold", fontSize: "14px", textAlign: "center" }}>
+          {product.qty ? `for ${product.qty}` : ""}
+        </span>
+        <span
+          style={{
+            color: product.inStock ? "#cc0000" : "#666",
+            fontWeight: "900",
+            fontSize: "14px",
+            textAlign: "right",
+            minWidth: "52px",
+          }}
+        >
+          {product.inStock ? "IN STOCK" : ""}
+        </span>
+      </div>
+
+      <div
+        style={{
+          padding: "2px 6px 4px",
+          color: "#0000cc",
+          fontWeight: "bold",
+          fontSize: "14px",
+          textAlign: "center",
+          lineHeight: "1.3",
+          minHeight: "40px",
+          textTransform: "uppercase",
+        }}
+      >
+        {descriptionText || "Product description here"}
+      </div>
+
+      <div
+        style={{
+          padding: "2px 6px 4px",
+          fontWeight: "bold",
+          fontSize: "11px",
+          color: "#000",
+          borderTop: "1px solid #ddd",
+          minHeight: "20px",
+        }}
+      >
+        {product.sku || "Item No."}
+      </div>
+    </div>
+  );
+}
+
+export default function CatalogMaker({
+  products = [],
+  categories = [],
+  initialTitle = "Product Catalog",
+}) {
+  const [catalogTitle, setCatalogTitle] = useState(initialTitle);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name-asc");
+  const [selectedProductIds, setSelectedProductIds] = useState(() =>
+    new Set(products.map((product) => product.id)),
+  );
+
+  useEffect(() => {
+    setSelectedProductIds((current) => {
+      const availableIds = new Set(products.map((product) => product.id));
+      const next = new Set();
+
+      for (const id of current) {
+        if (availableIds.has(id)) {
+          next.add(id);
+        }
+      }
+
+      if (current.size === 0 && products.length > 0) {
+        return new Set(products.map((product) => product.id));
+      }
+
+      return next;
+    });
+  }, [products]);
+
+  const sortedProducts = useMemo(() => {
+    const sorted = [...products];
+
+    sorted.sort((left, right) => {
+      switch (sortBy) {
+        case "recent-desc": {
+          const leftTime = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+          const rightTime = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+          if (leftTime !== rightTime) {
+            return rightTime - leftTime;
+          }
+          return Number(right.id) - Number(left.id);
+        }
+        case "name-desc":
+          return right.name.localeCompare(left.name);
+        case "price-asc":
+          return left.unitPriceInr - right.unitPriceInr;
+        case "price-desc":
+          return right.unitPriceInr - left.unitPriceInr;
+        case "stock-desc":
+          return right.stockQuantity - left.stockQuantity;
+        case "stock-asc":
+          return left.stockQuantity - right.stockQuantity;
+        case "category-asc":
+          return left.category.localeCompare(right.category) || left.name.localeCompare(right.name);
+        default:
+          return left.name.localeCompare(right.name);
+      }
+    });
+
+    return sorted;
+  }, [products, sortBy]);
+
+  const filteredProducts = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+
+    return sortedProducts.filter((product) => {
+      const matchesCategory =
+        categoryFilter === "all" || product.category === categoryFilter;
+      const matchesSearch =
+        normalizedSearch.length === 0 ||
+        product.name.toLowerCase().includes(normalizedSearch) ||
+        product.code.toLowerCase().includes(normalizedSearch) ||
+        product.category.toLowerCase().includes(normalizedSearch);
+
+      return matchesCategory && matchesSearch;
+    });
+  }, [categoryFilter, search, sortedProducts]);
+
+  const selectedProducts = useMemo(
+    () =>
+      sortedProducts
+        .filter((product) => selectedProductIds.has(product.id))
+        .map(buildCatalogProduct),
+    [selectedProductIds, sortedProducts],
+  );
+
+  const selectedProductsInView = useMemo(
+    () => filteredProducts.filter((product) => selectedProductIds.has(product.id)).length,
+    [filteredProducts, selectedProductIds],
+  );
+
+  const totalSelected = useMemo(
+    () => products.filter((product) => selectedProductIds.has(product.id)).length,
+    [products, selectedProductIds],
+  );
+
+  function toggleSelection(productId) {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+      return next;
+    });
+  }
+
+  function selectAllFiltered() {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      for (const product of filteredProducts) {
+        next.add(product.id);
+      }
+      return next;
+    });
+  }
+
+  function unselectAllFiltered() {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      for (const product of filteredProducts) {
+        next.delete(product.id);
+      }
+      return next;
+    });
+  }
+
+  function selectAllProducts() {
+    setSelectedProductIds(new Set(products.map((product) => product.id)));
+  }
+
+  function clearSelection() {
+    setSelectedProductIds(new Set());
+  }
+
+  function handlePrint() {
+    window.print();
+  }
+
+  return (
+    <>
+      <style jsx global>{`
+        @page {
+          margin: 4mm;
+          size: auto;
+        }
+
+        body {
+          margin: 0;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        @media print {
+          .no-print {
+            display: none !important;
+          }
+
+          body {
+            margin: 0;
+          }
+
+          .catalog-grid {
+            grid-template-columns: repeat(3, 1fr) !important;
+          }
+
+          .page-container {
+            padding: 0 !important;
+            background: white !important;
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+          }
+
+          .page-container,
+          .page-container * {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+        }
+      `}</style>
+
+      <section className="space-y-6">
+        <div className="no-print rounded-[2rem] border border-white/10 bg-white p-6 text-gray-900 shadow-2xl">
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-500">
+                  Catalog Builder
+                </p>
+                <h3 className="mt-2 text-3xl font-bold">Printable product catalog</h3>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">
+                  Pull products directly from the database, narrow the list, choose what belongs
+                  in the catalog, then export a clean printable PDF.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[360px]">
+                <div className="rounded-[1.5rem] border border-stone-200 bg-stone-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                    DB Products
+                  </p>
+                  <p className="mt-2 text-2xl font-bold text-stone-900">{products.length}</p>
+                </div>
+                <div className="rounded-[1.5rem] border border-stone-200 bg-stone-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                    Selected
+                  </p>
+                  <p className="mt-2 text-2xl font-bold text-stone-900">{totalSelected}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.85fr)]">
+              <section className="rounded-[1.75rem] border border-stone-200 bg-stone-50 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
+                      Catalog Details
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-stone-500">
+                      Set the title that will appear on the exported catalog page.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="rounded-2xl bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+                  >
+                    Print / Save PDF
+                  </button>
+                </div>
+
+                <label className="mt-5 block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                    Catalog Title
+                  </span>
+                  <input
+                    value={catalogTitle}
+                    onChange={(event) => setCatalogTitle(event.target.value)}
+                    className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    placeholder="Catalog title"
+                  />
+                </label>
+              </section>
+
+              <section className="rounded-[1.75rem] border border-stone-200 bg-stone-50 p-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
+                    Filter Products
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-stone-500">
+                    Search the database, narrow to a category, then sort the current result set
+                    before selecting products.
+                  </p>
+                </div>
+
+                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                  <label className="block md:col-span-2">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                      Search
+                    </span>
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      placeholder="Name, code, category"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                      Category
+                    </span>
+                    <select
+                      value={categoryFilter}
+                      onChange={(event) => setCategoryFilter(event.target.value)}
+                      className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    >
+                      <option value="all">All Categories</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.name}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block md:max-w-xs">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                      Sort
+                    </span>
+                    <select
+                      value={sortBy}
+                      onChange={(event) => setSortBy(event.target.value)}
+                      className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    >
+                      <option value="recent-desc">Recently Added</option>
+                      <option value="name-asc">Name A-Z</option>
+                      <option value="name-desc">Name Z-A</option>
+                      <option value="price-asc">Price Low-High</option>
+                      <option value="price-desc">Price High-Low</option>
+                      <option value="stock-desc">Stock High-Low</option>
+                      <option value="stock-asc">Stock Low-High</option>
+                      <option value="category-asc">Category</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <section className="rounded-[1.75rem] border border-stone-200 bg-white p-5">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
+                    Selection Actions
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-stone-500">
+                    {totalSelected} selected from {products.length} database products. Current
+                    filter shows {filteredProducts.length} products, with {selectedProductsInView} already included.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[420px]">
+                  <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                      Filtered
+                    </p>
+                    <p className="mt-1 text-xl font-bold text-stone-900">{filteredProducts.length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                      In View
+                    </p>
+                    <p className="mt-1 text-xl font-bold text-stone-900">{selectedProductsInView}</p>
+                  </div>
+                  <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                      Ready to Print
+                    </p>
+                    <p className="mt-1 text-xl font-bold text-stone-900">{selectedProducts.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={selectAllFiltered}
+                  className="rounded-2xl bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-600"
+                >
+                  Select Filtered
+                </button>
+                <button
+                  type="button"
+                  onClick={selectAllProducts}
+                  className="rounded-2xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800"
+                >
+                  Select All Products
+                </button>
+                <button
+                  type="button"
+                  onClick={unselectAllFiltered}
+                  className="rounded-2xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:bg-stone-50"
+                >
+                  Unselect Filtered
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="rounded-2xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div className="page-container bg-white p-4 shadow-2xl">
+          <div
+            style={{
+              background: "#fff",
+              padding: "8px 20px 10px",
+              marginBottom: "4px",
+              textAlign: "center",
+              borderBottom: "3px solid #000",
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontFamily: "'Arial Black', sans-serif",
+                fontSize: "22px",
+                letterSpacing: "1px",
+                color: "#000",
+              }}
+            >
+              {catalogTitle || initialTitle}
+            </h2>
+          </div>
+
+          {selectedProducts.length === 0 ? (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "60px",
+                color: "#888",
+                background: "#fff",
+                borderRadius: "10px",
+                marginTop: "20px",
+              }}
+            >
+              Select products from the catalog builder controls to generate a printable catalog.
+            </div>
+          ) : (
+            <div
+              className="catalog-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "0",
+                background: "#fff",
+                border: "1px solid #bbb",
+                alignItems: "start",
+              }}
+            >
+              {selectedProducts.map((product) => (
+                <CatalogCard
+                  key={product.id}
+                  product={product}
+                  selected={selectedProductIds.has(product.id)}
+                  onToggle={toggleSelection}
+                />
+              ))}
+            </div>
+          )}
+
+          <div
+            className="no-print"
+            style={{ textAlign: "center", marginTop: "16px", color: "#777", fontSize: "12px" }}
+          >
+            {selectedProducts.length} product{selectedProducts.length !== 1 ? "s" : ""} selected
+            {" "}· 3-column grid layout
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
