@@ -603,8 +603,9 @@ export default function AdminInventoryManager({
         method: "DELETE",
       });
 
+      const payload = await response.json();
+
       if (!response.ok) {
-        const payload = await response.json();
         setError(payload.error || "Could not delete product.");
         return;
       }
@@ -1023,6 +1024,11 @@ export default function AdminInventoryManager({
                             Stock level is {product.stockQuantity}. Use the edit action below to update
                             pricing, categorization, or imagery.
                           </p>
+                          {!product.canDelete ? (
+                            <p className="mt-2 text-sm text-amber-600">
+                              This product is used in {product.orderReferenceCount} order{product.orderReferenceCount === 1 ? "" : "s"} and cannot be deleted.
+                            </p>
+                          ) : null}
                         </div>
 
                         <div className="flex items-center justify-between gap-4 rounded-2xl bg-stone-50 px-4 py-3">
@@ -1043,9 +1049,10 @@ export default function AdminInventoryManager({
                           <button
                             type="button"
                             onClick={() => handleDelete(product.id)}
-                            className="flex-1 rounded-xl border border-red-300 py-2 font-semibold text-red-500 transition hover:bg-red-50"
+                            disabled={!product.canDelete}
+                            className="flex-1 rounded-xl border border-red-300 py-2 font-semibold text-red-500 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400 disabled:hover:bg-transparent"
                           >
-                            Delete
+                            {product.canDelete ? "Delete" : "Used In Orders"}
                           </button>
                         </div>
                       </div>
