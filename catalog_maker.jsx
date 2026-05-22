@@ -3,20 +3,160 @@
 import { useEffect, useMemo, useState } from "react";
 
 function buildCatalogProduct(product) {
+  const packagingText =
+    product.qtyPerCtn ? `${product.qtyPerCtn} IN CTN` : "";
+  const baseDescription =
+    product.description || product.name || "";
+
   return {
     id: product.id,
     image: product.imageUrl || null,
-    price: String(Number(product.unitPriceInr) || ""),
+    price: String(Math.round(Number(product.unitPriceInr) || 0) || ""),
     qty: product.catalogUnit || "",
     inStock: Number(product.stockQuantity) > 0,
-    description: product.name || "",
-    details: "",
+    description: baseDescription,
+    details: packagingText,
     sku: product.code || "",
   };
 }
 
+function splitCatalogText(text, maxLineLength = 22) {
+  const normalizedText = String(text || "").trim();
+  if (!normalizedText) {
+    return [];
+  }
+
+  const words = normalizedText.split(/\s+/);
+  const lines = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+
+    if (currentLine && nextLine.length > maxLineLength) {
+      lines.push(currentLine);
+      currentLine = word;
+      continue;
+    }
+
+    currentLine = nextLine;
+  }
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines;
+}
+
+function WhiteBackgroundImage({ src, alt, style }) {
+  const [processedSrc, setProcessedSrc] = useState(src);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!src) {
+      setProcessedSrc("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const image = new Image();
+    image.decoding = "async";
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      try {
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+
+        if (!width || !height) {
+          if (!cancelled) {
+            setProcessedSrc(src);
+          }
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+          if (!cancelled) {
+            setProcessedSrc(src);
+          }
+          return;
+        }
+
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+
+        const imageData = context.getImageData(0, 0, width, height);
+        const { data } = imageData;
+        const cornerIndexes = [
+          0,
+          (width - 1) * 4,
+          (height - 1) * width * 4,
+          ((height - 1) * width + (width - 1)) * 4,
+        ];
+
+        const darkCornerCount = cornerIndexes.reduce((count, index) => {
+          const red = data[index];
+          const green = data[index + 1];
+          const blue = data[index + 2];
+          const alpha = data[index + 3];
+
+          return alpha > 220 && red < 40 && green < 40 && blue < 40 ? count + 1 : count;
+        }, 0);
+
+        if (darkCornerCount >= 3) {
+          for (let index = 0; index < data.length; index += 4) {
+            const red = data[index];
+            const green = data[index + 1];
+            const blue = data[index + 2];
+            const alpha = data[index + 3];
+
+            if (alpha > 220 && red < 40 && green < 40 && blue < 40) {
+              data[index] = 255;
+              data[index + 1] = 255;
+              data[index + 2] = 255;
+            }
+          }
+
+          context.putImageData(imageData, 0, 0);
+        }
+
+        if (!cancelled) {
+          setProcessedSrc(canvas.toDataURL("image/png"));
+        }
+      } catch {
+        if (!cancelled) {
+          setProcessedSrc(src);
+        }
+      }
+    };
+
+    image.onerror = () => {
+      if (!cancelled) {
+        setProcessedSrc(src);
+      }
+    };
+
+    image.src = src;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  return <img src={processedSrc || src} alt={alt} style={style} />;
+}
+
 function CatalogCard({ product, selected, onToggle }) {
   const descriptionText = [product.description, product.details].filter(Boolean).join(" ");
+  const descriptionLines = splitCatalogText(descriptionText);
 
   return (
     <div
@@ -80,7 +220,7 @@ function CatalogCard({ product, selected, onToggle }) {
       <div
         style={{
           height: "160px",
-          backgroundColor: "#f5f5f5",
+          backgroundColor: "#fff",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -91,13 +231,13 @@ function CatalogCard({ product, selected, onToggle }) {
         }}
       >
         {product.image ? (
-          <img
+          <WhiteBackgroundImage
             src={product.image}
             alt={product.sku}
             style={{
               width: "100%",
               height: "100%",
-              objectFit: "cover",
+              objectFit: "contain",
               objectPosition: "center",
               display: "block",
               background: "#fff",
@@ -131,7 +271,7 @@ function CatalogCard({ product, selected, onToggle }) {
         </span>
         <span
           style={{
-            color: product.inStock ? "#cc0000" : "#666",
+            color: product.inStock ? "#15803d" : "#666",
             fontWeight: "900",
             fontSize: "14px",
             textAlign: "right",
@@ -154,7 +294,13 @@ function CatalogCard({ product, selected, onToggle }) {
           textTransform: "uppercase",
         }}
       >
-        {descriptionText || "Product description here"}
+        {descriptionLines.length > 0
+          ? descriptionLines.map((line, index) => (
+              <span key={`${product.id}-${index}`} style={{ display: "block" }}>
+                {line}
+              </span>
+            ))
+          : "Product description here"}
       </div>
 
       <div
@@ -260,6 +406,14 @@ export default function CatalogMaker({
         .filter((product) => selectedProductIds.has(product.id))
         .map(buildCatalogProduct),
     [selectedProductIds, sortedProducts],
+  );
+
+  const visibleSelectedProducts = useMemo(
+    () =>
+      filteredProducts
+        .filter((product) => selectedProductIds.has(product.id))
+        .map(buildCatalogProduct),
+    [filteredProducts, selectedProductIds],
   );
 
   const selectedProductsInView = useMemo(
@@ -589,7 +743,7 @@ export default function CatalogMaker({
                 alignItems: "start",
               }}
             >
-              {filteredProducts.map((product) => (
+              {visibleSelectedProducts.map((product) => (
                 <CatalogCard
                   key={product.id}
                   product={product}
@@ -604,8 +758,8 @@ export default function CatalogMaker({
             className="no-print"
             style={{ textAlign: "center", marginTop: "16px", color: "#777", fontSize: "12px" }}
           >
-            Showing {filteredProducts.length} product{filteredProducts.length !== 1 ? "s" : ""}
-            {" "}with {selectedProducts.length} included in the final output
+            Showing {visibleSelectedProducts.length} selected product{visibleSelectedProducts.length !== 1 ? "s" : ""}
+            {" "}in the current filter, with {selectedProducts.length} included in the final output
           </div>
         </div>
       </section>

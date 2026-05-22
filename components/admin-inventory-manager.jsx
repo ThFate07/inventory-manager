@@ -19,6 +19,8 @@ function emptyFormState() {
     code: "",
     name: "",
     category: "",
+    ctn: "",
+    qtyPerCtn: "",
     catalogUnit: "1 pcs",
     stockQuantity: "",
     unitPriceInr: "",
@@ -64,6 +66,45 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function normalizeImportedCell(value) {
+  if (value == null) {
+    return "";
+  }
+
+  return String(value).trim();
+}
+
+function readWorksheetRows(XLSX, worksheet) {
+  const matrix = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+  });
+
+  const headerRowIndex = matrix.findIndex((row) =>
+    Array.isArray(row) && row.some((cell) => normalizeImportedCell(cell) !== ""),
+  );
+
+  if (headerRowIndex === -1) {
+    return [];
+  }
+
+  const headers = matrix[headerRowIndex].map((cell, index) => {
+    const label = normalizeImportedCell(cell);
+    return label || `COLUMN_${index + 1}`;
+  });
+
+  return matrix
+    .slice(headerRowIndex + 1)
+    .filter(
+      (row) =>
+        Array.isArray(row) && row.some((cell) => normalizeImportedCell(cell) !== ""),
+    )
+    .map((row) =>
+      Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
+    );
+}
+
 function StatusPill({ children, tone = "neutral" }) {
   const toneClassName =
     tone === "success"
@@ -80,11 +121,15 @@ function StatusPill({ children, tone = "neutral" }) {
 }
 
 function getLogTone(action) {
-  if (action === "product_deleted") {
+  if (action === "product_deleted" || action === "import_image_unmatched_product") {
     return "warning";
   }
 
-  if (action === "stock_deducted_from_order" || action === "order_confirmed") {
+  if (
+    action === "stock_deducted_from_order" ||
+    action === "order_confirmed" ||
+    action === "import_image_unmatched_file"
+  ) {
     return "warning";
   }
 
@@ -102,12 +147,52 @@ function getLogLabel(action) {
     product_deleted: "Deleted",
     product_imported: "Imported",
     product_created_from_import: "Imported New",
+    import_image_unmatched_product: "Missing Image",
+    import_image_unmatched_file: "Unused Image",
     stock_deducted_from_order: "Stock Deducted",
     order_confirmed: "Order Confirmed",
     inventory_import_summary: "Import Summary",
   };
 
   return labels[action] || action;
+}
+
+function getLogType(action) {
+  if (
+    action === "product_imported" ||
+    action === "product_created_from_import" ||
+    action === "inventory_import_summary" ||
+    action === "import_image_unmatched_product" ||
+    action === "import_image_unmatched_file"
+  ) {
+    return "import";
+  }
+
+  if (action === "stock_deducted_from_order" || action === "order_confirmed") {
+    return "order";
+  }
+
+  if (
+    action === "product_created" ||
+    action === "product_updated" ||
+    action === "product_deleted"
+  ) {
+    return "product";
+  }
+
+  return "other";
+}
+
+function getLogTypeLabel(type) {
+  const labels = {
+    all: "All Logs",
+    import: "Import Logs",
+    order: "Order Logs",
+    product: "Product Logs",
+    other: "Other Logs",
+  };
+
+  return labels[type] || type;
 }
 
 function RecentOrdersPanel({ orders = [], expanded = false }) {
@@ -267,6 +352,21 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
 }
 
 function InventoryLogPanel({ logs = [] }) {
+  const [selectedType, setSelectedType] = useState("all");
+
+  const filteredLogs = useMemo(() => {
+    if (selectedType === "all") {
+      return logs;
+    }
+
+    return logs.filter((log) => getLogType(log.action) === selectedType);
+  }, [logs, selectedType]);
+
+  const availableTypes = useMemo(() => {
+    const types = new Set(logs.map((log) => getLogType(log.action)));
+    return ["all", ...Array.from(types)];
+  }, [logs]);
+
   return (
     <section className="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-xl">
       <div className="flex items-center justify-between gap-3">
@@ -277,17 +377,36 @@ function InventoryLogPanel({ logs = [] }) {
           <h3 className="mt-2 text-2xl font-bold text-stone-900">Recent activity</h3>
         </div>
         <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">
-          {logs.length}
+          {filteredLogs.length}
         </span>
       </div>
 
+      <div className="mt-5 flex flex-wrap items-end gap-4">
+        <label className="block">
+          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+            Log Type
+          </span>
+          <select
+            value={selectedType}
+            onChange={(event) => setSelectedType(event.target.value)}
+            className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-orange-400"
+          >
+            {availableTypes.map((type) => (
+              <option key={type} value={type}>
+                {getLogTypeLabel(type)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div className="mt-6 space-y-4">
-        {logs.length === 0 ? (
+        {filteredLogs.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 p-5 text-sm text-stone-500">
-            Inventory changes will appear here once admins start editing stock.
+            No inventory logs match the selected type.
           </div>
         ) : (
-          logs.map((log) => (
+          filteredLogs.map((log) => (
             <article
               key={log.id}
               className="rounded-[1.5rem] border border-stone-200 bg-stone-50 p-4"
@@ -298,6 +417,9 @@ function InventoryLogPanel({ logs = [] }) {
                     <StatusPill tone={getLogTone(log.action)}>
                       {getLogLabel(log.action)}
                     </StatusPill>
+                    <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">
+                      {getLogTypeLabel(getLogType(log.action))}
+                    </span>
                     <span className="text-xs uppercase tracking-[0.2em] text-stone-400">
                       {log.productCode || "Inventory"}
                     </span>
@@ -330,11 +452,13 @@ function ProductModal({
 }) {
   const fields = [
     { key: "name", label: "Product Name", type: "text", placeholder: "Product Name" },
-    { key: "code", label: "Product Code", type: "text", placeholder: "Product Code" },
+    { key: "code", label: "Item No", type: "text", placeholder: "Item No" },
     { key: "category", label: "Category", type: "text", placeholder: "Category" },
+    { key: "ctn", label: "CTN", type: "text", placeholder: "CTN" },
+    { key: "qtyPerCtn", label: "QTY/CTN", type: "text", placeholder: "QTY/CTN" },
     {
       key: "catalogUnit",
-      label: "Catalog Qty Label",
+      label: "FOR",
       type: "text",
       placeholder: "1 pcs",
     },
@@ -443,7 +567,10 @@ export default function AdminInventoryManager({
   const [isLoadingOrder, setIsLoadingOrder] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [loadedOrder, setLoadedOrder] = useState(null);
+  const [importFile, setImportFile] = useState(null);
   const [importImageFiles, setImportImageFiles] = useState([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState("");
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -537,6 +664,8 @@ export default function AdminInventoryManager({
       code: product.code,
       name: product.name,
       category: product.category,
+      ctn: product.ctn || "",
+      qtyPerCtn: product.qtyPerCtn || "",
       catalogUnit: product.catalogUnit || "1 pcs",
       stockQuantity: String(product.stockQuantity),
       unitPriceInr: String(product.unitPriceInr),
@@ -561,6 +690,8 @@ export default function AdminInventoryManager({
       code: form.code,
       name: form.name,
       category: form.category,
+      ctn: form.ctn,
+      qtyPerCtn: form.qtyPerCtn,
       catalogUnit: form.catalogUnit,
       stockQuantity: Number(form.stockQuantity),
       unitPriceInr: Number(form.unitPriceInr),
@@ -616,23 +747,35 @@ export default function AdminInventoryManager({
     }
   }
 
-  async function handleExcelUpload(event) {
-    const file = event.target.files?.[0];
+  function handleImportFileSelected(event) {
+    const file = event.target.files?.[0] || null;
+    setImportFile(file);
+    setError("");
+    setImportStatus("");
+  }
 
-    if (!file) {
+  async function handleExcelUpload() {
+    if (!importFile) {
+      setError("Select an Excel file before starting the import.");
       return;
     }
 
-    setSaving(true);
+    setIsImporting(true);
     setError("");
+    setImportStatus("");
 
     try {
       const XLSX = await import("xlsx");
-      const data = await file.arrayBuffer();
+      const data = await importFile.arrayBuffer();
       const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(worksheet);
+      const rows = readWorksheetRows(XLSX, worksheet);
+
+      if (rows.length === 0) {
+        setError("No product rows were found in the selected sheet.");
+        return;
+      }
 
       const imageFilesByCode = new Map();
       for (const imageFile of importImageFiles) {
@@ -648,7 +791,8 @@ export default function AdminInventoryManager({
 
       const matchedFilesByCode = new Map();
       for (const item of rows) {
-        const codeKey = normalizeCodeKey(item.code || item.Code);
+        const itemCode = item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code;
+        const codeKey = normalizeCodeKey(itemCode);
         if (!codeKey || matchedFilesByCode.has(codeKey)) {
           continue;
         }
@@ -668,11 +812,47 @@ export default function AdminInventoryManager({
         ),
       );
 
+      const unmatchedProducts =
+        importImageFiles.length > 0
+          ? rows
+              .map((item, index) => ({
+                code:
+                  item["ITEM NO"] ||
+                  item.itemNo ||
+                  item.ItemNo ||
+                  item.code ||
+                  item.Code ||
+                  `ITEM-${index + 1}`,
+                name:
+                  item.DESCRIPTION ||
+                  item.description ||
+                  item.Description ||
+                  item.name ||
+                  item.Name ||
+                  "Unnamed Product",
+                category: item.category || item.Category || "General",
+              }))
+              .filter((product) => !matchedFilesByCode.has(normalizeCodeKey(product.code)))
+          : [];
+
+      const unmatchedImages = Array.from(imageFilesByCode.entries()).flatMap(([codeKey, files]) => {
+        if (!matchedFilesByCode.has(codeKey)) {
+          return files.map((file) => file.name);
+        }
+
+        return files.slice(1).map((file) => file.name);
+      });
+
       const normalizedProducts = rows.map((item, index) => ({
-        code: item.code || item.Code || `ITEM-${index + 1}`,
-        name: item.name || item.Name || "Unnamed Product",
+        code: item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code || `ITEM-${index + 1}`,
+        name: item.DESCRIPTION || item.description || item.Description || item.name || item.Name || "Unnamed Product",
         category: item.category || item.Category || "General",
+        ctn: item.CTN || item.ctn || item.Ctn || "",
+        qtyPerCtn: item["QTY/CTN"] || item.qtyPerCtn || item.QtyPerCtn || item.qtyPerCTN || "",
         catalogUnit:
+          item.FOR ||
+          item.for ||
+          item.For ||
           item.catalogUnit ||
           item.CatalogUnit ||
           item.catalogQtyLabel ||
@@ -682,10 +862,21 @@ export default function AdminInventoryManager({
           item.pack ||
           item.Pack ||
           "1 pcs",
-        stockQuantity: Number(item.stockQuantity || item.stock || item.StockQuantity || item.Stock || 0),
-        unitPriceInr: Number(item.unitPriceInr || item.price || item.Price || 0),
+        stockQuantity: Number(
+          item["TOTAL QTY"] ||
+            item.totalQty ||
+            item.TotalQty ||
+            item.stockQuantity ||
+            item.stock ||
+            item.StockQuantity ||
+            item.Stock ||
+            0,
+        ),
+        unitPriceInr: Number(item["UNIT PRICE"] || item.unitPriceInr || item.price || item.Price || 0),
         imageUrl:
-          imageDataByCode.get(normalizeCodeKey(item.code || item.Code)) ||
+          imageDataByCode.get(
+            normalizeCodeKey(item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code),
+          ) ||
           item.imageUrl ||
           item.image ||
           item.ImageUrl ||
@@ -698,7 +889,11 @@ export default function AdminInventoryManager({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ products: normalizedProducts }),
+        body: JSON.stringify({
+          products: normalizedProducts,
+          unmatchedProducts,
+          unmatchedImages,
+        }),
       });
 
       const payload = await response.json();
@@ -709,13 +904,24 @@ export default function AdminInventoryManager({
       }
 
       await refreshDashboard();
-      event.target.value = "";
+      const unmatchedProductPreview =
+        unmatchedProducts.length > 0
+          ? ` Unmatched products: ${unmatchedProducts.slice(0, 5).map((product) => product.code).join(", ")}${unmatchedProducts.length > 5 ? ` and ${unmatchedProducts.length - 5} more` : ""}.`
+          : "";
+      const unmatchedImagePreview =
+        unmatchedImages.length > 0
+          ? ` Unmatched images: ${unmatchedImages.slice(0, 5).join(", ")}${unmatchedImages.length > 5 ? ` and ${unmatchedImages.length - 5} more` : ""}.`
+          : "";
+      setImportStatus(
+        `Imported ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"} successfully${importImageFiles.length > 0 ? ` with ${imageDataByCode.size} matched image${imageDataByCode.size === 1 ? "" : "s"}` : ""}.${unmatchedProductPreview}${unmatchedImagePreview}`,
+      );
+      setImportFile(null);
       setImportImageFiles([]);
       setActiveSection("imports");
     } catch {
       setError("Excel import failed.");
     } finally {
-      setSaving(false);
+      setIsImporting(false);
     }
   }
 
@@ -723,7 +929,26 @@ export default function AdminInventoryManager({
     const files = Array.from(event.target.files || []).filter((file) =>
       file.type.startsWith("image/"),
     );
-    setImportImageFiles(files);
+    setImportImageFiles((current) => {
+      const next = [...current];
+
+      for (const file of files) {
+        const alreadyAdded = next.some(
+          (existingFile) =>
+            existingFile.name === file.name &&
+            existingFile.size === file.size &&
+            existingFile.lastModified === file.lastModified,
+        );
+
+        if (!alreadyAdded) {
+          next.push(file);
+        }
+      }
+
+      return next;
+    });
+    setError("");
+    setImportStatus("");
   }
 
   async function handleLogout() {
@@ -937,7 +1162,7 @@ export default function AdminInventoryManager({
                       type="text"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search product code or item..."
+                      placeholder="Search item no or item..."
                       className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-orange-400 md:w-72"
                     />
                     <select
@@ -999,11 +1224,13 @@ export default function AdminInventoryManager({
                       className="overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-lg"
                     >
                       {product.imageUrl ? (
-                        <img
-                          src={product.imageUrl}
-                          alt={product.name}
-                          className="h-60 w-full object-cover"
-                        />
+                        <div className="flex h-60 w-full items-center justify-center bg-white p-3">
+                          <img
+                            src={product.imageUrl}
+                            alt={product.name}
+                            className="h-full w-full object-contain"
+                          />
+                        </div>
                       ) : (
                         <div className="flex h-60 w-full items-center justify-center bg-stone-100 text-sm font-semibold uppercase tracking-[0.2em] text-stone-400">
                           No Image
@@ -1023,6 +1250,12 @@ export default function AdminInventoryManager({
                           <p className="mt-2 text-sm leading-6 text-gray-500">
                             Stock level is {product.stockQuantity}. Use the edit action below to update
                             pricing, categorization, or imagery.
+                          </p>
+                          <p className="mt-2 text-sm text-gray-500">
+                            {product.qtyPerCtn && product.ctn
+                              ? `${product.name}, ${product.qtyPerCtn} In ${product.ctn}`
+                              : product.name}
+                            {product.catalogUnit ? `, For ${product.catalogUnit}` : ""}
                           </p>
                           {!product.canDelete ? (
                             <p className="mt-2 text-sm text-amber-600">
@@ -1256,9 +1489,14 @@ export default function AdminInventoryManager({
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv"
-                  onChange={handleExcelUpload}
+                  onChange={handleImportFileSelected}
                   className="mt-4 block w-full text-sm"
                 />
+                <p className="mt-2 text-sm text-gray-500">
+                  {importFile
+                    ? `Selected sheet: ${importFile.name}`
+                    : "Choose the inventory sheet first. Import starts only when you click the button below."}
+                </p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <label className="block rounded-[1.25rem] border border-orange-200 bg-white p-4">
                     <span className="text-sm font-semibold text-gray-900">Optional image folder</span>
@@ -1272,7 +1510,7 @@ export default function AdminInventoryManager({
                       className="mt-3 block w-full text-sm"
                     />
                     <p className="mt-2 text-xs text-gray-500">
-                      Pick a folder when image files are named with the product code.
+                      Pick a folder when image files are named with the item number.
                     </p>
                   </label>
 
@@ -1291,15 +1529,43 @@ export default function AdminInventoryManager({
                   </label>
                 </div>
                 <p className="mt-3 text-sm text-gray-500">
-                  Supported columns: Code, Name, Category, CatalogUnit, Stock, Price, Image. If
-                  you upload images separately, the importer matches them to rows using the file
-                  name as the product code.
+                  Supported columns: ITEM NO, DESCRIPTION, CTN, QTY/CTN, UNIT PRICE, FOR,
+                  Category, Stock, and Image. If you upload images separately, the importer
+                  matches them to rows using the file name as the item number.
                 </p>
                 <p className="mt-2 text-sm text-gray-500">
                   {importImageFiles.length > 0
-                    ? `${importImageFiles.length} image file${importImageFiles.length === 1 ? "" : "s"} ready for code-based matching.`
+                    ? `${importImageFiles.length} image file${importImageFiles.length === 1 ? "" : "s"} staged for item-number matching.`
                     : "No separate images selected. Existing product images will stay as-is when the sheet has no image column."}
                 </p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleExcelUpload}
+                    disabled={!importFile || isImporting}
+                    className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-300"
+                  >
+                    {isImporting ? "Importing..." : "Start Import"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportFile(null);
+                      setImportImageFiles([]);
+                      setImportStatus("");
+                      setError("");
+                    }}
+                    disabled={isImporting}
+                    className="rounded-2xl border border-stone-200 bg-white px-5 py-3 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Clear Selection
+                  </button>
+                </div>
+                {importStatus ? (
+                  <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    {importStatus}
+                  </p>
+                ) : null}
                 {error ? (
                   <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">
                     {error}

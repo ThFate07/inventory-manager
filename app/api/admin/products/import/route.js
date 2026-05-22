@@ -12,8 +12,12 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const products = Array.isArray(body.products) ? body.products : [];
+    const importReport = {
+      unmatchedProducts: Array.isArray(body.unmatchedProducts) ? body.unmatchedProducts : [],
+      unmatchedImages: Array.isArray(body.unmatchedImages) ? body.unmatchedImages : [],
+    };
 
-    await importProducts(products);
+    await importProducts(products, importReport);
 
     const [updatedProducts, categories] = await Promise.all([
       listProducts({ admin: true }),

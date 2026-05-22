@@ -6,6 +6,8 @@ const sampleProducts = [
     code: "CRK-101",
     name: "Classic Dinner Plate",
     category: "Plates",
+    ctn: "",
+    qtyPerCtn: "",
     stockQuantity: 120,
     unitPriceInr: 249,
     imageUrl:
@@ -15,6 +17,8 @@ const sampleProducts = [
     code: "CRK-202",
     name: "Royal Tea Cup Set",
     category: "Cups",
+    ctn: "",
+    qtyPerCtn: "",
     stockQuantity: 80,
     unitPriceInr: 499,
     imageUrl:
@@ -24,6 +28,8 @@ const sampleProducts = [
     code: "CRK-303",
     name: "Premium Serving Bowl",
     category: "Bowls",
+    ctn: "",
+    qtyPerCtn: "",
     stockQuantity: 45,
     unitPriceInr: 699,
     imageUrl:
@@ -33,6 +39,8 @@ const sampleProducts = [
     code: "CRK-404",
     name: "Designer Glass Set",
     category: "Glasses",
+    ctn: "",
+    qtyPerCtn: "",
     stockQuantity: 60,
     unitPriceInr: 899,
     imageUrl:
@@ -86,6 +94,9 @@ async function main() {
         code text not null unique,
         name text not null,
         category_id bigint not null references categories(id) on delete restrict,
+        ctn text not null default '',
+        qty_per_ctn text not null default '',
+        catalog_unit text not null default '1 pcs',
         stock_quantity integer not null default 0 check (stock_quantity >= 0),
         unit_price_inr numeric(12, 2) not null default 0 check (unit_price_inr >= 0),
         image_url text not null,
@@ -112,6 +123,7 @@ async function main() {
         product_id bigint references products(id) on delete set null,
         product_code text,
         product_name text,
+        category text,
         details text not null,
         created_at timestamptz not null default now()
       );
@@ -137,12 +149,15 @@ async function main() {
 
       await client.query(
         `
-          insert into products (code, name, category_id, stock_quantity, unit_price_inr, image_url)
-          values ($1, $2, $3, $4, $5, $6)
+          insert into products (code, name, category_id, ctn, qty_per_ctn, catalog_unit, stock_quantity, unit_price_inr, image_url)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           on conflict (code)
           do update set
             name = excluded.name,
             category_id = excluded.category_id,
+            ctn = excluded.ctn,
+            qty_per_ctn = excluded.qty_per_ctn,
+            catalog_unit = excluded.catalog_unit,
             stock_quantity = excluded.stock_quantity,
             unit_price_inr = excluded.unit_price_inr,
             image_url = excluded.image_url,
@@ -152,6 +167,9 @@ async function main() {
           product.code,
           product.name,
           categoryResult.rows[0].id,
+          product.ctn || "",
+          product.qtyPerCtn || "",
+          product.catalogUnit || "1 pcs",
           product.stockQuantity,
           product.unitPriceInr,
           product.imageUrl,
