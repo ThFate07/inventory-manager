@@ -25,4 +25,4 @@ Price is stored numerically as `unit_price_inr` instead of formatted text so the
 3. Run `npm run db:setup`
 4. Run `npm run dev`
 
-The app reads inventory data from PostgreSQL. The sample products are only used by `npm run db:setup` to seed the database.
+The app reads inventory data from PostgreSQL and does not auto-insert sample products at runtime. The sample products are only used by `npm run db:setup` if you intentionally want seeded starter data.
