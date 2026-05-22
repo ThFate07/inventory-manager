@@ -49,6 +49,16 @@ function splitCatalogText(text, maxLineLength = 22) {
   return lines;
 }
 
+function chunkItems(items, chunkSize) {
+  const chunks = [];
+
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+}
+
 function WhiteBackgroundImage({ src, alt, style }) {
   const [processedSrc, setProcessedSrc] = useState(src);
 
@@ -177,14 +187,15 @@ function CatalogCard({ product, selected, onToggle }) {
         }
       }}
       style={{
-        border: "1px solid #ccc",
+        border: "none",
         backgroundColor: "#fff",
         display: "flex",
         flexDirection: "column",
         position: "relative",
         fontFamily: "'Arial', sans-serif",
         fontSize: "12px",
-        minHeight: "164px",
+        height: "100%",
+        minHeight: "0",
         cursor: "pointer",
         outline: "none",
       }}
@@ -218,8 +229,10 @@ function CatalogCard({ product, selected, onToggle }) {
       </label>
 
       <div
+        className="catalog-card-image"
         style={{
-          height: "160px",
+          flex: "1 1 auto",
+          minHeight: "170px",
           backgroundColor: "#fff",
           display: "flex",
           alignItems: "center",
@@ -227,7 +240,7 @@ function CatalogCard({ product, selected, onToggle }) {
           overflow: "hidden",
           padding: "4px",
           margin: "0 4px",
-          border: "1px solid #e0e0e0",
+          border: "none",
         }}
       >
         {product.image ? (
@@ -289,8 +302,8 @@ function CatalogCard({ product, selected, onToggle }) {
           fontWeight: "bold",
           fontSize: "14px",
           textAlign: "center",
-          lineHeight: "1.3",
-          minHeight: "40px",
+          lineHeight: "1.25",
+          minHeight: "32px",
           textTransform: "uppercase",
         }}
       >
@@ -309,8 +322,8 @@ function CatalogCard({ product, selected, onToggle }) {
           fontWeight: "bold",
           fontSize: "11px",
           color: "#000",
-          borderTop: "1px solid #ddd",
-          minHeight: "20px",
+          borderTop: "none",
+          minHeight: "18px",
         }}
       >
         {product.sku || "Item No."}
@@ -416,6 +429,11 @@ export default function CatalogMaker({
     [filteredProducts, selectedProductIds],
   );
 
+  const visibleSelectedProductPages = useMemo(
+    () => chunkItems(visibleSelectedProducts, 9),
+    [visibleSelectedProducts],
+  );
+
   const selectedProductsInView = useMemo(
     () => filteredProducts.filter((product) => selectedProductIds.has(product.id)).length,
     [filteredProducts, selectedProductIds],
@@ -464,8 +482,8 @@ export default function CatalogMaker({
     <>
       <style jsx global>{`
         @page {
-          margin: 4mm;
-          size: auto;
+          margin: 0;
+          size: A4 portrait;
         }
 
         body {
@@ -474,6 +492,23 @@ export default function CatalogMaker({
 
         * {
           box-sizing: border-box;
+        }
+
+        .catalog-grid {
+          border: none;
+        }
+
+        .catalog-grid > .catalog-card {
+          border-right: 1px solid #000;
+          border-bottom: 1px solid #000;
+        }
+
+        .catalog-grid > .catalog-card:nth-child(3n) {
+          border-right: none;
+        }
+
+        .catalog-grid > .catalog-card:nth-last-child(-n + 3) {
+          border-bottom: none;
         }
 
         @media print {
@@ -485,8 +520,56 @@ export default function CatalogMaker({
             margin: 0;
           }
 
+          .catalog-page {
+            break-after: page;
+            page-break-after: always;
+            height: calc(297mm - 2px);
+            padding: 0;
+            margin: 0;
+            box-sizing: border-box;
+          }
+
+          .catalog-page:last-child {
+            break-after: auto;
+            page-break-after: auto;
+          }
+
           .catalog-grid {
             grid-template-columns: repeat(3, 1fr) !important;
+            grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+            height: 100% !important;
+            box-sizing: border-box;
+            border: none !important;
+          }
+
+          .catalog-card {
+            font-size: 11px !important;
+          }
+
+          .catalog-card-image {
+            min-height: 150px !important;
+            padding: 3px !important;
+          }
+
+          .catalog-card-summary {
+            padding: 3px 5px 1px !important;
+          }
+
+          .catalog-card-summary span {
+            font-size: 12px !important;
+          }
+
+          .catalog-card-description {
+            padding: 1px 5px 3px !important;
+            font-size: 12px !important;
+            line-height: 1.2 !important;
+            min-height: 28px !important;
+          }
+
+          .catalog-card-sku {
+            font-size: 10px !important;
+            padding: 1px 5px 3px !important;
+            min-height: 16px !important;
           }
 
           .page-container {
@@ -695,30 +778,8 @@ export default function CatalogMaker({
           </div>
         </div>
 
-        <div className="page-container bg-white p-4 shadow-2xl">
-          <div
-            style={{
-              background: "#fff",
-              padding: "8px 20px 10px",
-              marginBottom: "4px",
-              textAlign: "center",
-              borderBottom: "3px solid #000",
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                fontFamily: "'Arial Black', sans-serif",
-                fontSize: "22px",
-                letterSpacing: "1px",
-                color: "#000",
-              }}
-            >
-              {catalogTitle || initialTitle}
-            </h2>
-          </div>
-
-          {selectedProducts.length === 0 ? (
+        <div className="page-container bg-white p-0 shadow-2xl">
+          {visibleSelectedProducts.length === 0 ? (
             <div
               style={{
                 textAlign: "center",
@@ -732,24 +793,39 @@ export default function CatalogMaker({
               Select products from the catalog builder controls to generate a printable catalog.
             </div>
           ) : (
-            <div
-              className="catalog-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "0",
-                background: "#fff",
-                border: "1px solid #bbb",
-                alignItems: "start",
-              }}
-            >
-              {visibleSelectedProducts.map((product) => (
-                <CatalogCard
-                  key={product.id}
-                  product={product}
-                  selected={selectedProductIds.has(product.id)}
-                  onToggle={toggleSelection}
-                />
+            <div className="catalog-pages" style={{ display: "flex", flexDirection: "column", gap: "0" }}>
+              {visibleSelectedProductPages.map((pageProducts, pageIndex) => (
+                <section
+                  key={`${pageIndex}-${pageProducts[0]?.id || "page"}`}
+                  className="catalog-page"
+                  style={{
+                    breakInside: "avoid",
+                    pageBreakInside: "avoid",
+                  }}
+                >
+                  <div
+                    className="catalog-grid"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(3, 1fr)",
+                      gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+                      gap: "0",
+                      background: "#fff",
+                      border: "none",
+                      alignItems: "stretch",
+                      height: "100%",
+                    }}
+                  >
+                    {pageProducts.map((product) => (
+                      <CatalogCard
+                        key={product.id}
+                        product={product}
+                        selected={selectedProductIds.has(product.id)}
+                        onToggle={toggleSelection}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}
