@@ -45,6 +45,25 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function normalizeCodeKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function fileNameToCodeKey(fileName) {
+  const withoutExtension = String(fileName || "").replace(/\.[^.]+$/, "").trim();
+  const withoutIndexSuffix = withoutExtension.replace(/\s*\(\d+\)\s*$/, "").trim();
+  return normalizeCodeKey(withoutIndexSuffix || withoutExtension);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
 function StatusPill({ children, tone = "neutral" }) {
   const toneClassName =
     tone === "success"
@@ -335,7 +354,7 @@ function ProductModal({
       step: "1",
       placeholder: "Stock Quantity",
     },
-    { key: "imageUrl", label: "Image URL", type: "text", placeholder: "Image URL" },
+    { key: "imageUrl", label: "Image URL", type: "text", placeholder: "Image URL", required: false },
   ];
 
   return (
@@ -375,7 +394,7 @@ function ProductModal({
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className="w-full rounded-2xl border border-stone-200 px-5 py-4 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-400"
                 placeholder={field.placeholder}
-                required
+                required={field.required !== false}
               />
             </label>
           ))}
@@ -424,6 +443,7 @@ export default function AdminInventoryManager({
   const [isLoadingOrder, setIsLoadingOrder] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [loadedOrder, setLoadedOrder] = useState(null);
+  const [importImageFiles, setImportImageFiles] = useState([]);
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -613,6 +633,40 @@ export default function AdminInventoryManager({
       const worksheet = workbook.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(worksheet);
 
+      const imageFilesByCode = new Map();
+      for (const imageFile of importImageFiles) {
+        const codeKey = fileNameToCodeKey(imageFile.name);
+        if (!codeKey) {
+          continue;
+        }
+
+        const currentGroup = imageFilesByCode.get(codeKey) || [];
+        currentGroup.push(imageFile);
+        imageFilesByCode.set(codeKey, currentGroup);
+      }
+
+      const matchedFilesByCode = new Map();
+      for (const item of rows) {
+        const codeKey = normalizeCodeKey(item.code || item.Code);
+        if (!codeKey || matchedFilesByCode.has(codeKey)) {
+          continue;
+        }
+
+        const groupedFiles = imageFilesByCode.get(codeKey);
+        if (groupedFiles?.length) {
+          matchedFilesByCode.set(codeKey, groupedFiles[0]);
+        }
+      }
+
+      const imageDataByCode = new Map(
+        await Promise.all(
+          Array.from(matchedFilesByCode.entries()).map(async ([codeKey, matchedFile]) => [
+            codeKey,
+            await readFileAsDataUrl(matchedFile),
+          ]),
+        ),
+      );
+
       const normalizedProducts = rows.map((item, index) => ({
         code: item.code || item.Code || `ITEM-${index + 1}`,
         name: item.name || item.Name || "Unnamed Product",
@@ -630,11 +684,12 @@ export default function AdminInventoryManager({
         stockQuantity: Number(item.stockQuantity || item.stock || item.StockQuantity || item.Stock || 0),
         unitPriceInr: Number(item.unitPriceInr || item.price || item.Price || 0),
         imageUrl:
+          imageDataByCode.get(normalizeCodeKey(item.code || item.Code)) ||
           item.imageUrl ||
           item.image ||
           item.ImageUrl ||
           item.Image ||
-          "https://images.unsplash.com/photo-1603190287605-e6ade32fa852?q=80&w=1200&auto=format&fit=crop",
+          "",
       }));
 
       const response = await fetch("/api/admin/products/import", {
@@ -654,12 +709,20 @@ export default function AdminInventoryManager({
 
       await refreshDashboard();
       event.target.value = "";
+      setImportImageFiles([]);
       setActiveSection("imports");
     } catch {
       setError("Excel import failed.");
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleImportImagesSelected(event) {
+    const files = Array.from(event.target.files || []).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    setImportImageFiles(files);
   }
 
   async function handleLogout() {
@@ -934,11 +997,17 @@ export default function AdminInventoryManager({
                       key={product.id}
                       className="overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-lg"
                     >
-                      <img
-                        src={product.imageUrl}
-                        alt={product.name}
-                        className="h-60 w-full object-cover"
-                      />
+                      {product.imageUrl ? (
+                        <img
+                          src={product.imageUrl}
+                          alt={product.name}
+                          className="h-60 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-60 w-full items-center justify-center bg-stone-100 text-sm font-semibold uppercase tracking-[0.2em] text-stone-400">
+                          No Image
+                        </div>
+                      )}
 
                       <div className="space-y-5 p-6">
                         <div className="flex items-start justify-between gap-3">
@@ -1183,8 +1252,46 @@ export default function AdminInventoryManager({
                   onChange={handleExcelUpload}
                   className="mt-4 block w-full text-sm"
                 />
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <label className="block rounded-[1.25rem] border border-orange-200 bg-white p-4">
+                    <span className="text-sm font-semibold text-gray-900">Optional image folder</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      webkitdirectory=""
+                      directory=""
+                      onChange={handleImportImagesSelected}
+                      className="mt-3 block w-full text-sm"
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      Pick a folder when image files are named with the product code.
+                    </p>
+                  </label>
+
+                  <label className="block rounded-[1.25rem] border border-orange-200 bg-white p-4">
+                    <span className="text-sm font-semibold text-gray-900">Optional image files</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleImportImagesSelected}
+                      className="mt-3 block w-full text-sm"
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      You can also select individual images instead of a full folder.
+                    </p>
+                  </label>
+                </div>
                 <p className="mt-3 text-sm text-gray-500">
-                  Supported columns: Code, Name, Category, CatalogUnit, Stock, Price, Image.
+                  Supported columns: Code, Name, Category, CatalogUnit, Stock, Price, Image. If
+                  you upload images separately, the importer matches them to rows using the file
+                  name as the product code.
+                </p>
+                <p className="mt-2 text-sm text-gray-500">
+                  {importImageFiles.length > 0
+                    ? `${importImageFiles.length} image file${importImageFiles.length === 1 ? "" : "s"} ready for code-based matching.`
+                    : "No separate images selected. Existing product images will stay as-is when the sheet has no image column."}
                 </p>
                 {error ? (
                   <p className="mt-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">

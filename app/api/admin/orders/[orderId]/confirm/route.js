@@ -10,7 +10,8 @@ export async function POST(_request, { params }) {
   }
 
   try {
-    const order = await confirmOrder(params.orderId);
+    const { orderId } = await params;
+    const order = await confirmOrder(orderId);
     return NextResponse.json({ order });
   } catch (error) {
     return NextResponse.json(

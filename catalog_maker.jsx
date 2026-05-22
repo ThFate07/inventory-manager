@@ -21,6 +21,21 @@ function CatalogCard({ product, selected, onToggle }) {
   return (
     <div
       className="catalog-card"
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        if (event.target.closest("input, button, a, label")) {
+          return;
+        }
+
+        onToggle(product.id);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onToggle(product.id);
+        }
+      }}
       style={{
         border: "1px solid #ccc",
         backgroundColor: "#fff",
@@ -30,6 +45,8 @@ function CatalogCard({ product, selected, onToggle }) {
         fontFamily: "'Arial', sans-serif",
         fontSize: "12px",
         minHeight: "164px",
+        cursor: "pointer",
+        outline: "none",
       }}
     >
       <label
@@ -62,7 +79,7 @@ function CatalogCard({ product, selected, onToggle }) {
 
       <div
         style={{
-          height: "130px",
+          height: "160px",
           backgroundColor: "#f5f5f5",
           display: "flex",
           alignItems: "center",
@@ -272,16 +289,6 @@ export default function CatalogMaker({
       const next = new Set(current);
       for (const product of filteredProducts) {
         next.add(product.id);
-      }
-      return next;
-    });
-  }
-
-  function unselectAllFiltered() {
-    setSelectedProductIds((current) => {
-      const next = new Set(current);
-      for (const product of filteredProducts) {
-        next.delete(product.id);
       }
       return next;
     });
@@ -513,28 +520,21 @@ export default function CatalogMaker({
                   onClick={selectAllFiltered}
                   className="rounded-2xl bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-600"
                 >
-                  Select Filtered
+                  Get Filtered
                 </button>
                 <button
                   type="button"
                   onClick={selectAllProducts}
                   className="rounded-2xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800"
                 >
-                  Select All Products
-                </button>
-                <button
-                  type="button"
-                  onClick={unselectAllFiltered}
-                  className="rounded-2xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:bg-stone-50"
-                >
-                  Unselect Filtered
+                  Select All
                 </button>
                 <button
                   type="button"
                   onClick={clearSelection}
                   className="rounded-2xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50"
                 >
-                  Clear Selection
+                  clear selection
                 </button>
               </div>
             </section>
@@ -589,7 +589,7 @@ export default function CatalogMaker({
                 alignItems: "start",
               }}
             >
-              {selectedProducts.map((product) => (
+              {filteredProducts.map((product) => (
                 <CatalogCard
                   key={product.id}
                   product={product}
@@ -604,8 +604,8 @@ export default function CatalogMaker({
             className="no-print"
             style={{ textAlign: "center", marginTop: "16px", color: "#777", fontSize: "12px" }}
           >
-            {selectedProducts.length} product{selectedProducts.length !== 1 ? "s" : ""} selected
-            {" "}· 3-column grid layout
+            Showing {filteredProducts.length} product{filteredProducts.length !== 1 ? "s" : ""}
+            {" "}with {selectedProducts.length} included in the final output
           </div>
         </div>
       </section>
