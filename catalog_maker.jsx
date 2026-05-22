@@ -49,114 +49,19 @@ function splitCatalogText(text, maxLineLength = 22) {
   return lines;
 }
 
-function WhiteBackgroundImage({ src, alt, style }) {
-  const [processedSrc, setProcessedSrc] = useState(src);
+function chunkCatalogProducts(products, pageSize = 9) {
+  const pages = [];
 
-  useEffect(() => {
-    let cancelled = false;
+  for (let index = 0; index < products.length; index += pageSize) {
+    pages.push(products.slice(index, index + pageSize));
+  }
 
-    if (!src) {
-      setProcessedSrc("");
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const image = new Image();
-    image.decoding = "async";
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      try {
-        const width = image.naturalWidth || image.width;
-        const height = image.naturalHeight || image.height;
-
-        if (!width || !height) {
-          if (!cancelled) {
-            setProcessedSrc(src);
-          }
-          return;
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const context = canvas.getContext("2d");
-
-        if (!context) {
-          if (!cancelled) {
-            setProcessedSrc(src);
-          }
-          return;
-        }
-
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, width, height);
-        context.drawImage(image, 0, 0, width, height);
-
-        const imageData = context.getImageData(0, 0, width, height);
-        const { data } = imageData;
-        const cornerIndexes = [
-          0,
-          (width - 1) * 4,
-          (height - 1) * width * 4,
-          ((height - 1) * width + (width - 1)) * 4,
-        ];
-
-        const darkCornerCount = cornerIndexes.reduce((count, index) => {
-          const red = data[index];
-          const green = data[index + 1];
-          const blue = data[index + 2];
-          const alpha = data[index + 3];
-
-          return alpha > 220 && red < 40 && green < 40 && blue < 40 ? count + 1 : count;
-        }, 0);
-
-        if (darkCornerCount >= 3) {
-          for (let index = 0; index < data.length; index += 4) {
-            const red = data[index];
-            const green = data[index + 1];
-            const blue = data[index + 2];
-            const alpha = data[index + 3];
-
-            if (alpha > 220 && red < 40 && green < 40 && blue < 40) {
-              data[index] = 255;
-              data[index + 1] = 255;
-              data[index + 2] = 255;
-            }
-          }
-
-          context.putImageData(imageData, 0, 0);
-        }
-
-        if (!cancelled) {
-          setProcessedSrc(canvas.toDataURL("image/png"));
-        }
-      } catch {
-        if (!cancelled) {
-          setProcessedSrc(src);
-        }
-      }
-    };
-
-    image.onerror = () => {
-      if (!cancelled) {
-        setProcessedSrc(src);
-      }
-    };
-
-    image.src = src;
-
-    return () => {
-      cancelled = true;
-    };
-  }, [src]);
-
-  return <img src={processedSrc || src} alt={alt} style={style} />;
+  return pages;
 }
 
 function CatalogCard({ product, selected, onToggle }) {
   const descriptionText = [product.description, product.details].filter(Boolean).join(" ");
-  const descriptionLines = splitCatalogText(descriptionText);
+  const descriptionLines = splitCatalogText(descriptionText, 18).slice(0, 2);
 
   return (
     <div
@@ -177,16 +82,17 @@ function CatalogCard({ product, selected, onToggle }) {
         }
       }}
       style={{
-        border: "1px solid #ccc",
+        border: "2px solid #000",
         backgroundColor: "#fff",
         display: "flex",
         flexDirection: "column",
         position: "relative",
         fontFamily: "'Arial', sans-serif",
         fontSize: "12px",
-        minHeight: "164px",
+        minHeight: "328px",
         cursor: "pointer",
         outline: "none",
+        height: "100%",
       }}
     >
       <label
@@ -219,19 +125,18 @@ function CatalogCard({ product, selected, onToggle }) {
 
       <div
         style={{
-          height: "160px",
+          height: "254px",
           backgroundColor: "#fff",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           overflow: "hidden",
-          padding: "4px",
+          padding: "10px 8px 6px",
           margin: "0 4px",
-          border: "1px solid #e0e0e0",
         }}
       >
         {product.image ? (
-          <WhiteBackgroundImage
+          <img
             src={product.image}
             alt={product.sku}
             style={{
@@ -253,7 +158,7 @@ function CatalogCard({ product, selected, onToggle }) {
 
       <div
         style={{
-          padding: "4px 6px 2px",
+          padding: "6px 8px 2px",
           display: "grid",
           gridTemplateColumns: "auto 1fr auto",
           alignItems: "center",
@@ -261,8 +166,8 @@ function CatalogCard({ product, selected, onToggle }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: "3px" }}>
-          <span style={{ color: "#cc0000", fontWeight: "bold", fontSize: "14px" }}>Rs</span>
-          <span style={{ color: "#cc0000", fontWeight: "900", fontSize: "16px" }}>
+          <span style={{ color: "#cc0000", fontWeight: "bold", fontSize: "16px" }}>Rs</span>
+          <span style={{ color: "#cc0000", fontWeight: "900", fontSize: "20px" }}>
             {product.price || "—"}
           </span>
         </div>
@@ -273,7 +178,7 @@ function CatalogCard({ product, selected, onToggle }) {
           style={{
             color: product.inStock ? "#15803d" : "#666",
             fontWeight: "900",
-            fontSize: "14px",
+            fontSize: "13px",
             textAlign: "right",
             minWidth: "52px",
           }}
@@ -284,13 +189,13 @@ function CatalogCard({ product, selected, onToggle }) {
 
       <div
         style={{
-          padding: "2px 6px 4px",
+          padding: "4px 8px 6px",
           color: "#0000cc",
           fontWeight: "bold",
           fontSize: "14px",
           textAlign: "center",
-          lineHeight: "1.3",
-          minHeight: "40px",
+          lineHeight: "1.25",
+          minHeight: "44px",
           textTransform: "uppercase",
         }}
       >
@@ -305,12 +210,13 @@ function CatalogCard({ product, selected, onToggle }) {
 
       <div
         style={{
-          padding: "2px 6px 4px",
+          padding: "0 8px 6px",
           fontWeight: "bold",
-          fontSize: "11px",
+          fontSize: "14px",
           color: "#000",
-          borderTop: "1px solid #ddd",
-          minHeight: "20px",
+          minHeight: "16px",
+          textAlign: "left",
+          lineHeight: "1.1",
         }}
       >
         {product.sku || "Item No."}
@@ -421,6 +327,11 @@ export default function CatalogMaker({
     [filteredProducts, selectedProductIds],
   );
 
+  const visibleProductPages = useMemo(
+    () => chunkCatalogProducts(visibleSelectedProducts, 9),
+    [visibleSelectedProducts],
+  );
+
   const totalSelected = useMemo(
     () => products.filter((product) => selectedProductIds.has(product.id)).length,
     [products, selectedProductIds],
@@ -487,6 +398,14 @@ export default function CatalogMaker({
 
           .catalog-grid {
             grid-template-columns: repeat(3, 1fr) !important;
+            grid-auto-rows: 1fr !important;
+          }
+
+          .catalog-card {
+            min-height: 94mm !important;
+            height: 94mm !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
 
           .page-container {
@@ -501,6 +420,16 @@ export default function CatalogMaker({
           .page-container * {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+          }
+
+          .catalog-print-page {
+            break-after: page;
+            page-break-after: always;
+          }
+
+          .catalog-print-page.catalog-print-page-last {
+            break-after: auto;
+            page-break-after: auto;
           }
         }
       `}</style>
@@ -696,27 +625,7 @@ export default function CatalogMaker({
         </div>
 
         <div className="page-container bg-white p-4 shadow-2xl">
-          <div
-            style={{
-              background: "#fff",
-              padding: "8px 20px 10px",
-              marginBottom: "4px",
-              textAlign: "center",
-              borderBottom: "3px solid #000",
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                fontFamily: "'Arial Black', sans-serif",
-                fontSize: "22px",
-                letterSpacing: "1px",
-                color: "#000",
-              }}
-            >
-              {catalogTitle || initialTitle}
-            </h2>
-          </div>
+          
 
           {selectedProducts.length === 0 ? (
             <div
@@ -732,26 +641,38 @@ export default function CatalogMaker({
               Select products from the catalog builder controls to generate a printable catalog.
             </div>
           ) : (
-            <div
-              className="catalog-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "0",
-                background: "#fff",
-                border: "1px solid #bbb",
-                alignItems: "start",
-              }}
-            >
-              {visibleSelectedProducts.map((product) => (
-                <CatalogCard
-                  key={product.id}
-                  product={product}
-                  selected={selectedProductIds.has(product.id)}
-                  onToggle={toggleSelection}
-                />
-              ))}
-            </div>
+            visibleProductPages.map((pageProducts, pageIndex) => (
+              <div
+                key={`catalog-page-${pageIndex + 1}`}
+                className={`catalog-print-page${
+                  pageIndex === visibleProductPages.length - 1 ? " catalog-print-page-last" : ""
+                }`}
+                style={{
+                  marginBottom: pageIndex === visibleProductPages.length - 1 ? "0" : "16px",
+                }}
+              >
+                <div
+                  className="catalog-grid"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "0",
+                    background: "#fff",
+                    alignItems: "start",
+                    gridAutoRows: "1fr",
+                  }}
+                >
+                  {pageProducts.map((product) => (
+                    <CatalogCard
+                      key={product.id}
+                      product={product}
+                      selected={selectedProductIds.has(product.id)}
+                      onToggle={toggleSelection}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
           )}
 
           <div
