@@ -25,6 +25,8 @@ function emptyFormState() {
     stockQuantity: "",
     unitPriceInr: "",
     imageUrl: "",
+    imageFile: null,
+    imageFileName: "",
   };
 }
 
@@ -48,7 +50,11 @@ function formatDateTime(value) {
 }
 
 function normalizeCodeKey(value) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function normalizeItemCode(value) {
+  return String(value || "").replace(/\s+/g, "").trim();
 }
 
 function fileNameToCodeKey(fileName) {
@@ -64,6 +70,36 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
     reader.readAsDataURL(file);
   });
+}
+
+function getImportedItemCode(item) {
+  return normalizeItemCode(
+    item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code || "",
+  );
+}
+
+function getImportedItemName(item) {
+  return normalizeImportedCell(
+    item.DESCRIPTION || item.description || item.Description || item.name || item.Name || "",
+  );
+}
+
+function isImportableWorksheetRow(row) {
+  const itemCode = getImportedItemCode(row);
+  const itemName = getImportedItemName(row);
+  const price = normalizeImportedCell(row["UNIT PRICE"] || row.unitPriceInr || row.price || row.Price || "");
+  const totalQty = normalizeImportedCell(
+    row["TOTAL QTY"] ||
+      row.totalQty ||
+      row.TotalQty ||
+      row.stockQuantity ||
+      row.stock ||
+      row.StockQuantity ||
+      row.Stock ||
+      "",
+  );
+
+  return Boolean(itemCode && (itemName || price || totalQty));
 }
 
 function normalizeImportedCell(value) {
@@ -102,7 +138,8 @@ function readWorksheetRows(XLSX, worksheet) {
     )
     .map((row) =>
       Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
-    );
+    )
+    .filter((row) => isImportableWorksheetRow(row));
 }
 
 function StatusPill({ children, tone = "neutral" }) {
@@ -447,6 +484,7 @@ function ProductModal({
   error,
   onClose,
   onChange,
+  onImageFileChange,
   onSubmit,
   title,
 }) {
@@ -522,6 +560,23 @@ function ProductModal({
               />
             </label>
           ))}
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-gray-700">
+              Upload Image
+            </span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => onImageFileChange(event.target.files?.[0] || null)}
+              className="w-full rounded-2xl border border-stone-200 px-5 py-4 text-gray-900 file:mr-4 file:rounded-xl file:border-0 file:bg-orange-100 file:px-4 file:py-2 file:font-semibold file:text-orange-700"
+            />
+            <p className="mt-2 text-xs text-gray-500">
+              {form.imageFileName
+                ? `Selected file: ${form.imageFileName}. This file will be used when you save.`
+                : "You can keep using an image URL or upload a replacement image file here."}
+            </p>
+          </label>
 
           {error ? (
             <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -648,7 +703,7 @@ export default function AdminInventoryManager({
   function updateForm(field, value) {
     setForm((current) => ({
       ...current,
-      [field]: value,
+      [field]: field === "code" ? normalizeItemCode(value) : value,
     }));
   }
 
@@ -670,6 +725,8 @@ export default function AdminInventoryManager({
       stockQuantity: String(product.stockQuantity),
       unitPriceInr: String(product.unitPriceInr),
       imageUrl: product.imageUrl,
+      imageFile: null,
+      imageFileName: "",
     });
     setError("");
     setIsProductModalOpen(true);
@@ -686,19 +743,18 @@ export default function AdminInventoryManager({
     setSaving(true);
     setError("");
 
-    const payload = {
-      code: form.code,
-      name: form.name,
-      category: form.category,
-      ctn: form.ctn,
-      qtyPerCtn: form.qtyPerCtn,
-      catalogUnit: form.catalogUnit,
-      stockQuantity: Number(form.stockQuantity),
-      unitPriceInr: Number(form.unitPriceInr),
-      imageUrl: form.imageUrl,
-    };
-
     try {
+      const payload = {
+        code: form.code,
+        name: form.name,
+        category: form.category,
+        ctn: form.ctn,
+        qtyPerCtn: form.qtyPerCtn,
+        catalogUnit: form.catalogUnit,
+        stockQuantity: Number(form.stockQuantity),
+        unitPriceInr: Number(form.unitPriceInr),
+        imageUrl: form.imageFile ? await readFileAsDataUrl(form.imageFile) : form.imageUrl,
+      };
       const response = await fetch(
         form.id ? `/api/admin/products/${form.id}` : "/api/admin/products",
         {
@@ -755,8 +811,8 @@ export default function AdminInventoryManager({
   }
 
   async function handleExcelUpload() {
-    if (!importFile) {
-      setError("Select an Excel file before starting the import.");
+    if (!importFile && importImageFiles.length === 0) {
+      setError("Select an Excel file or at least one image before starting the import.");
       return;
     }
 
@@ -765,16 +821,20 @@ export default function AdminInventoryManager({
     setImportStatus("");
 
     try {
-      const XLSX = await import("xlsx");
-      const data = await importFile.arrayBuffer();
-      const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const rows = readWorksheetRows(XLSX, worksheet);
+      let rows = [];
 
-      if (rows.length === 0) {
-        setError("No product rows were found in the selected sheet.");
-        return;
+      if (importFile) {
+        const XLSX = await import("xlsx");
+        const data = await importFile.arrayBuffer();
+        const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        rows = readWorksheetRows(XLSX, worksheet);
+
+        if (rows.length === 0) {
+          setError("No product rows were found in the selected sheet.");
+          return;
+        }
       }
 
       const imageFilesByCode = new Map();
@@ -789,17 +849,34 @@ export default function AdminInventoryManager({
         imageFilesByCode.set(codeKey, currentGroup);
       }
 
-      const matchedFilesByCode = new Map();
-      for (const item of rows) {
-        const itemCode = item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code;
-        const codeKey = normalizeCodeKey(itemCode);
-        if (!codeKey || matchedFilesByCode.has(codeKey)) {
-          continue;
-        }
+      const importSourceRows =
+        rows.length > 0
+          ? rows
+          : products.map((product) => ({
+              id: product.id,
+              "ITEM NO": product.code,
+              DESCRIPTION: product.name,
+              Category: product.category,
+              CTN: product.ctn,
+              "QTY/CTN": product.qtyPerCtn,
+              FOR: product.catalogUnit,
+              Stock: product.stockQuantity,
+              "UNIT PRICE": product.unitPriceInr,
+              Image: product.imageUrl,
+            }));
 
-        const groupedFiles = imageFilesByCode.get(codeKey);
+      const matchedFilesByCode = new Map();
+      for (const [codeKey, groupedFiles] of imageFilesByCode.entries()) {
         if (groupedFiles?.length) {
-          matchedFilesByCode.set(codeKey, groupedFiles[0]);
+          matchedFilesByCode.set(codeKey, groupedFiles[groupedFiles.length - 1]);
+        }
+      }
+
+      const matchedRowCodes = new Set();
+      for (const item of importSourceRows) {
+        const codeKey = normalizeCodeKey(getImportedItemCode(item));
+        if (codeKey && matchedFilesByCode.has(codeKey)) {
+          matchedRowCodes.add(codeKey);
         }
       }
 
@@ -814,75 +891,69 @@ export default function AdminInventoryManager({
 
       const unmatchedProducts =
         importImageFiles.length > 0
-          ? rows
-              .map((item, index) => ({
-                code:
-                  item["ITEM NO"] ||
-                  item.itemNo ||
-                  item.ItemNo ||
-                  item.code ||
-                  item.Code ||
-                  `ITEM-${index + 1}`,
-                name:
-                  item.DESCRIPTION ||
-                  item.description ||
-                  item.Description ||
-                  item.name ||
-                  item.Name ||
-                  "Unnamed Product",
+          ? importSourceRows
+              .map((item) => ({
+                code: getImportedItemCode(item),
+                name: getImportedItemName(item) || "Unnamed Product",
                 category: item.category || item.Category || "General",
               }))
-              .filter((product) => !matchedFilesByCode.has(normalizeCodeKey(product.code)))
+              .filter((product) => !matchedRowCodes.has(normalizeCodeKey(product.code)))
           : [];
 
       const unmatchedImages = Array.from(imageFilesByCode.entries()).flatMap(([codeKey, files]) => {
-        if (!matchedFilesByCode.has(codeKey)) {
+        if (!matchedRowCodes.has(codeKey)) {
           return files.map((file) => file.name);
         }
 
-        return files.slice(1).map((file) => file.name);
+        return files.slice(0, -1).map((file) => file.name);
       });
 
-      const normalizedProducts = rows.map((item, index) => ({
-        code: item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code || `ITEM-${index + 1}`,
-        name: item.DESCRIPTION || item.description || item.Description || item.name || item.Name || "Unnamed Product",
-        category: item.category || item.Category || "General",
-        ctn: item.CTN || item.ctn || item.Ctn || "",
-        qtyPerCtn: item["QTY/CTN"] || item.qtyPerCtn || item.QtyPerCtn || item.qtyPerCTN || "",
-        catalogUnit:
-          item.FOR ||
-          item.for ||
-          item.For ||
-          item.catalogUnit ||
-          item.CatalogUnit ||
-          item.catalogQtyLabel ||
-          item.CatalogQtyLabel ||
-          item.qtyLabel ||
-          item.QtyLabel ||
-          item.pack ||
-          item.Pack ||
-          "1 pcs",
-        stockQuantity: Number(
-          item["TOTAL QTY"] ||
-            item.totalQty ||
-            item.TotalQty ||
-            item.stockQuantity ||
-            item.stock ||
-            item.StockQuantity ||
-            item.Stock ||
-            0,
-        ),
-        unitPriceInr: Number(item["UNIT PRICE"] || item.unitPriceInr || item.price || item.Price || 0),
-        imageUrl:
-          imageDataByCode.get(
-            normalizeCodeKey(item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code),
-          ) ||
-          item.imageUrl ||
-          item.image ||
-          item.ImageUrl ||
-          item.Image ||
-          "",
-      }));
+      const normalizedProducts = importSourceRows
+        .filter((item) => rows.length > 0 || matchedRowCodes.has(normalizeCodeKey(getImportedItemCode(item))))
+        .map((item) => ({
+          id: item.id ? Number(item.id) : undefined,
+          code: getImportedItemCode(item),
+          name: getImportedItemName(item) || "Unnamed Product",
+          category: item.category || item.Category || "General",
+          ctn: item.CTN || item.ctn || item.Ctn || "",
+          qtyPerCtn: item["QTY/CTN"] || item.qtyPerCtn || item.QtyPerCtn || item.qtyPerCTN || "",
+          catalogUnit:
+            item.FOR ||
+            item.for ||
+            item.For ||
+            item.catalogUnit ||
+            item.CatalogUnit ||
+            item.catalogQtyLabel ||
+            item.CatalogQtyLabel ||
+            item.qtyLabel ||
+            item.QtyLabel ||
+            item.pack ||
+            item.Pack ||
+            "1 pcs",
+          stockQuantity: Number(
+            item["TOTAL QTY"] ||
+              item.totalQty ||
+              item.TotalQty ||
+              item.stockQuantity ||
+              item.stock ||
+              item.StockQuantity ||
+              item.Stock ||
+              0,
+          ),
+          unitPriceInr: Number(item["UNIT PRICE"] || item.unitPriceInr || item.price || item.Price || 0),
+          imageUrl:
+            imageDataByCode.get(normalizeCodeKey(getImportedItemCode(item))) ||
+            item.imageUrl ||
+            item.image ||
+            item.ImageUrl ||
+            item.Image ||
+            "",
+        }));
+
+      if (normalizedProducts.length === 0) {
+        setError("No products matched the uploaded image names.");
+        return;
+      }
 
       const response = await fetch("/api/admin/products/import", {
         method: "POST",
@@ -893,13 +964,14 @@ export default function AdminInventoryManager({
           products: normalizedProducts,
           unmatchedProducts,
           unmatchedImages,
+          importMode: importFile ? "sheet" : "images-only",
         }),
       });
 
       const payload = await response.json();
 
       if (!response.ok) {
-        setError(payload.error || "Excel import failed.");
+        setError(payload.error || "Import failed.");
         return;
       }
 
@@ -913,13 +985,13 @@ export default function AdminInventoryManager({
           ? ` Unmatched images: ${unmatchedImages.slice(0, 5).join(", ")}${unmatchedImages.length > 5 ? ` and ${unmatchedImages.length - 5} more` : ""}.`
           : "";
       setImportStatus(
-        `Imported ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"} successfully${importImageFiles.length > 0 ? ` with ${imageDataByCode.size} matched image${imageDataByCode.size === 1 ? "" : "s"}` : ""}.${unmatchedProductPreview}${unmatchedImagePreview}`,
+        `${importFile ? `Imported ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"}` : `Updated ${normalizedProducts.length} product image${normalizedProducts.length === 1 ? "" : "s"}`} successfully${importImageFiles.length > 0 ? ` with ${matchedRowCodes.size} matched image${matchedRowCodes.size === 1 ? "" : "s"}` : ""}.${unmatchedProductPreview}${unmatchedImagePreview}`,
       );
       setImportFile(null);
       setImportImageFiles([]);
       setActiveSection("imports");
     } catch {
-      setError("Excel import failed.");
+      setError("Import failed.");
     } finally {
       setIsImporting(false);
     }
@@ -930,22 +1002,16 @@ export default function AdminInventoryManager({
       file.type.startsWith("image/"),
     );
     setImportImageFiles((current) => {
-      const next = [...current];
+      const nextByCode = new Map(current.map((file) => [fileNameToCodeKey(file.name), file]));
 
       for (const file of files) {
-        const alreadyAdded = next.some(
-          (existingFile) =>
-            existingFile.name === file.name &&
-            existingFile.size === file.size &&
-            existingFile.lastModified === file.lastModified,
-        );
-
-        if (!alreadyAdded) {
-          next.push(file);
+        const codeKey = fileNameToCodeKey(file.name);
+        if (codeKey) {
+          nextByCode.set(codeKey, file);
         }
       }
 
-      return next;
+      return Array.from(nextByCode.values());
     });
     setError("");
     setImportStatus("");
@@ -1481,7 +1547,7 @@ export default function AdminInventoryManager({
               </p>
               <h3 className="mt-2 text-3xl font-bold">Excel Inventory Import</h3>
               <p className="mt-2 text-gray-500">
-                Import a sheet when you want to bulk refresh inventory without editing one product at a time.
+                Import a sheet when you want to bulk refresh inventory, or upload images alone to remap product photos by item number.
               </p>
 
               <div className="mt-8 rounded-[1.75rem] border border-dashed border-orange-200 bg-orange-50 p-6">
@@ -1495,7 +1561,7 @@ export default function AdminInventoryManager({
                 <p className="mt-2 text-sm text-gray-500">
                   {importFile
                     ? `Selected sheet: ${importFile.name}`
-                    : "Choose the inventory sheet first. Import starts only when you click the button below."}
+                    : "Choose a sheet, or skip it and upload only images. Import starts only when you click the button below."}
                 </p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <label className="block rounded-[1.25rem] border border-orange-200 bg-white p-4">
@@ -1534,9 +1600,14 @@ export default function AdminInventoryManager({
                   matches them to rows using the file name as the item number.
                 </p>
                 <p className="mt-2 text-sm text-gray-500">
+                  If multiple products share the same ITEM NO, one matching image file will be
+                  reused for all of those variants. This is useful when one product photo shows
+                  multiple related items together.
+                </p>
+                <p className="mt-2 text-sm text-gray-500">
                   {importImageFiles.length > 0
                     ? `${importImageFiles.length} image file${importImageFiles.length === 1 ? "" : "s"} staged for item-number matching.`
-                    : "No separate images selected. Existing product images will stay as-is when the sheet has no image column."}
+                    : "No separate images selected. You can import just images later to replace existing product photos by item number."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button
@@ -1591,6 +1662,13 @@ export default function AdminInventoryManager({
           error={error}
           onClose={closeModal}
           onChange={updateForm}
+          onImageFileChange={(file) =>
+            setForm((current) => ({
+              ...current,
+              imageFile: file,
+              imageFileName: file?.name || "",
+            }))
+          }
           onSubmit={handleSubmit}
           title={form.id ? "Edit Inventory Item" : "Create Inventory Item"}
         />
