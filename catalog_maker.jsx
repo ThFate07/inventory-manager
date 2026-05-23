@@ -229,6 +229,7 @@ export default function CatalogMaker({
   products = [],
   categories = [],
   initialTitle = "Product Catalog",
+  sourceLabel = "Database Products",
 }) {
   const [catalogTitle, setCatalogTitle] = useState(initialTitle);
   const [search, setSearch] = useState("");
@@ -444,15 +445,15 @@ export default function CatalogMaker({
                 </p>
                 <h3 className="mt-2 text-3xl font-bold">Printable product catalog</h3>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">
-                  Pull products directly from the database, narrow the list, choose what belongs
-                  in the catalog, then export a clean printable PDF.
+                  Pull items from the current source, narrow the list, choose what belongs in the
+                  catalog, then export a clean printable PDF.
                 </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[360px]">
                 <div className="rounded-[1.5rem] border border-stone-200 bg-stone-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
-                    DB Products
+                    {sourceLabel}
                   </p>
                   <p className="mt-2 text-2xl font-bold text-stone-900">{products.length}</p>
                 </div>
@@ -504,8 +505,8 @@ export default function CatalogMaker({
                     Filter Products
                   </p>
                   <p className="mt-2 text-sm leading-6 text-stone-500">
-                    Search the database, narrow to a category, then sort the current result set
-                    before selecting products.
+                    Search the current source, narrow to a category, then sort the current result
+                    set before selecting products.
                   </p>
                 </div>
 
@@ -570,8 +571,8 @@ export default function CatalogMaker({
                     Selection Actions
                   </p>
                   <p className="mt-2 text-sm leading-6 text-stone-500">
-                    {totalSelected} selected from {products.length} database products. Current
-                    filter shows {filteredProducts.length} products, with {selectedProductsInView} already included.
+                    {totalSelected} selected from {products.length} items in the current source.
+                    Current filter shows {filteredProducts.length} products, with {selectedProductsInView} already included.
                   </p>
                 </div>
 

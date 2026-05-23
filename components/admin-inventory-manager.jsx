@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import CatalogMaker from "../catalog_maker";
+
+const CATALOG_SOURCE_STORAGE_KEY = "admin-catalog-source";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Dashboard" },
@@ -49,6 +51,13 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function calculateOrderTotal(items = []) {
+  return items.reduce(
+    (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPriceInr || 0),
+    0,
+  );
+}
+
 function normalizeCodeKey(value) {
   return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
 }
@@ -68,6 +77,104 @@ function fileNameToCodeKey(fileName) {
   const withoutExtension = String(fileName || "").replace(/\.[^.]+$/, "").trim();
   const withoutIndexSuffix = withoutExtension.replace(/\s*\(\d+\)\s*$/, "").trim();
   return normalizeCodeKey(withoutIndexSuffix || withoutExtension);
+}
+
+function readCatalogSourceFromStorage() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(CATALOG_SOURCE_STORAGE_KEY);
+    return rawValue ? JSON.parse(rawValue) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCatalogSourceToStorage(value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!value) {
+    window.sessionStorage.removeItem(CATALOG_SOURCE_STORAGE_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(CATALOG_SOURCE_STORAGE_KEY, JSON.stringify(value));
+}
+
+function getImportedImageUrl(item) {
+  return normalizeImportedCell(
+    item["IMAGE URL"] ||
+      item["IMAGE"] ||
+      item["IMG"] ||
+      item.imageUrl ||
+      item.image ||
+      item.ImageUrl ||
+      item.Image ||
+      "",
+  );
+}
+
+function buildWorkbookCatalogProducts(rows, imageDataByCode = new Map()) {
+  return rows.map((item, index) => {
+    const code = getImportedItemCode(item) || `ROW-${index + 1}`;
+    const normalizedCodeKey = normalizeCodeKey(code);
+
+    return {
+      id: index + 1,
+      code,
+      name: getImportedItemName(item) || "Unnamed Product",
+      category: item.category || item.Category || "General",
+      ctn: item.CTN || item.ctn || item.Ctn || "",
+      qtyPerCtn: item["QTY/CTN"] || item.qtyPerCtn || item.QtyPerCtn || item.qtyPerCTN || "",
+      catalogUnit:
+        item.FOR ||
+        item.for ||
+        item.For ||
+        item.catalogUnit ||
+        item.CatalogUnit ||
+        item.catalogQtyLabel ||
+        item.CatalogQtyLabel ||
+        item.qtyLabel ||
+        item.QtyLabel ||
+        item.pack ||
+        item.Pack ||
+        "1 pcs",
+      stockQuantity: Number(
+        item["TOTAL QTY"] ||
+          item.totalQty ||
+          item.TotalQty ||
+          item.stockQuantity ||
+          item.stock ||
+          item.StockQuantity ||
+          item.Stock ||
+          0,
+      ),
+      unitPriceInr: Number(item["UNIT PRICE"] || item.unitPriceInr || item.price || item.Price || 0),
+      imageUrl: imageDataByCode.get(normalizedCodeKey) || getImportedImageUrl(item) || "",
+    };
+  });
+}
+
+function buildCatalogCategories(products) {
+  const categoryMap = new Map();
+
+  for (const product of products) {
+    const name = String(product.category || "General").trim() || "General";
+    const key = normalizeCodeKey(name);
+
+    if (!categoryMap.has(key)) {
+      categoryMap.set(key, {
+        id: key || name,
+        name,
+      });
+    }
+  }
+
+  return Array.from(categoryMap.values());
 }
 
 async function parseJsonResponse(response) {
@@ -271,7 +378,11 @@ function getLogTone(action) {
 
   if (
     action === "stock_deducted_from_order" ||
+    action === "stock_restored_from_order" ||
     action === "order_confirmed" ||
+    action === "order_reversed" ||
+    action === "order_deleted" ||
+    action === "orders_restocked_before_clear" ||
     action === "orders_cleared" ||
     action === "import_image_unmatched_file" ||
     action === "products_cleared"
@@ -297,8 +408,12 @@ function getLogLabel(action) {
     import_image_unmatched_file: "Unused Image",
     products_cleared: "Cleared All",
     orders_cleared: "Orders Cleared",
+    orders_restocked_before_clear: "Orders Restocked",
     stock_deducted_from_order: "Stock Deducted",
+    stock_restored_from_order: "Stock Restored",
     order_confirmed: "Order Confirmed",
+    order_reversed: "Order Reversed",
+    order_deleted: "Order Deleted",
     inventory_import_summary: "Import Summary",
   };
 
@@ -322,7 +437,11 @@ function getLogType(action) {
 
   if (
     action === "stock_deducted_from_order" ||
+    action === "stock_restored_from_order" ||
     action === "order_confirmed" ||
+    action === "order_reversed" ||
+    action === "order_deleted" ||
+    action === "orders_restocked_before_clear" ||
     action === "orders_cleared"
   ) {
     return "order";
@@ -486,7 +605,9 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
                                 <p className="text-sm text-stone-500">{item.productCode}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-sm text-stone-500">Qty {item.quantity}</p>
+                                <p className="text-sm text-stone-500">
+                                  Qty {item.quantity} x {formatCurrency(item.unitPriceInr)}
+                                </p>
                                 <p className="font-semibold text-stone-900">
                                   {formatCurrency(item.lineTotalInr)}
                                 </p>
@@ -740,13 +861,38 @@ export default function AdminInventoryManager({
   const [orderLookupError, setOrderLookupError] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
+  const [isReversingOrder, setIsReversingOrder] = useState(false);
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
   const [loadedOrder, setLoadedOrder] = useState(null);
+  const [importWorkflow, setImportWorkflow] = useState("inventory");
   const [importFile, setImportFile] = useState(null);
   const [importImageFiles, setImportImageFiles] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState("");
   const [isClearingProducts, setIsClearingProducts] = useState(false);
   const [isClearingOrders, setIsClearingOrders] = useState(false);
+  const [catalogSourceProducts, setCatalogSourceProducts] = useState(
+    () => readCatalogSourceFromStorage()?.products || [],
+  );
+  const [catalogSourceCategories, setCatalogSourceCategories] = useState(
+    () => readCatalogSourceFromStorage()?.categories || [],
+  );
+  const [catalogSourceTitle, setCatalogSourceTitle] = useState(
+    () => readCatalogSourceFromStorage()?.title || "Crockery Product Catalog",
+  );
+
+  useEffect(() => {
+    if (catalogSourceProducts.length === 0) {
+      writeCatalogSourceToStorage(null);
+      return;
+    }
+
+    writeCatalogSourceToStorage({
+      products: catalogSourceProducts,
+      categories: catalogSourceCategories,
+      title: catalogSourceTitle,
+    });
+  }, [catalogSourceCategories, catalogSourceProducts, catalogSourceTitle]);
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -934,8 +1080,17 @@ export default function AdminInventoryManager({
   }
 
   async function handleExcelUpload() {
+    if (importWorkflow === "catalog" && !importFile) {
+      setError("Select an Excel file before generating the catalog.");
+      return;
+    }
+
     if (!importFile && importImageFiles.length === 0) {
-      setError("Select an Excel file or at least one image before starting the import.");
+      setError(
+        importWorkflow === "catalog"
+          ? "Select an Excel file or at least one image before generating the catalog."
+          : "Select an Excel file or at least one image before starting the import.",
+      );
       return;
     }
 
@@ -987,7 +1142,9 @@ export default function AdminInventoryManager({
       const importSourceRows =
         rows.length > 0
           ? rows
-          : products.map((product) => ({
+          : importWorkflow === "catalog"
+            ? []
+            : products.map((product) => ({
               id: product.id,
               "ITEM NO": product.code,
               DESCRIPTION: product.name,
@@ -1017,7 +1174,7 @@ export default function AdminInventoryManager({
 
       if (matchedFilesByCode.size > 0) {
         setImportStatus(
-          `Uploading ${matchedFilesByCode.size} matched image${matchedFilesByCode.size === 1 ? "" : "s"} to Blob...`,
+          `Uploading ${matchedFilesByCode.size} matched image${matchedFilesByCode.size === 1 ? "" : "s"} to cloud storage...`,
         );
       }
 
@@ -1096,7 +1253,28 @@ export default function AdminInventoryManager({
         }));
 
       if (normalizedProducts.length === 0) {
-        setError("No products matched the uploaded image names.");
+        setError(
+          importWorkflow === "catalog"
+            ? "No importable catalog rows were found in the selected sheet."
+            : "No products matched the uploaded image names.",
+        );
+        return;
+      }
+
+      if (importWorkflow === "catalog") {
+        const catalogProducts = buildWorkbookCatalogProducts(importSourceRows, imageDataByCode);
+        const catalogCategories = buildCatalogCategories(catalogProducts);
+        const catalogTitleBase = String(importFile?.name || "Imported Catalog").replace(/\.[^.]+$/, "");
+
+        setCatalogSourceProducts(catalogProducts);
+        setCatalogSourceCategories(catalogCategories);
+        setCatalogSourceTitle(catalogTitleBase || "Imported Catalog");
+        setImportStatus(
+          `Prepared ${catalogProducts.length} catalog item${catalogProducts.length === 1 ? "" : "s"} from ${importFile?.name || "the selected sheet"}.`,
+        );
+        setImportFile(null);
+        setImportImageFiles([]);
+        setActiveSection("catalog");
         return;
       }
 
@@ -1163,6 +1341,9 @@ export default function AdminInventoryManager({
       setImportStatus(
         `${importFile ? `Imported ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"}` : `Updated ${normalizedProducts.length} product image${normalizedProducts.length === 1 ? "" : "s"}`} successfully${importImageFiles.length > 0 ? ` with ${matchedRowCodes.size} matched image${matchedRowCodes.size === 1 ? "" : "s"}` : ""}.${unmatchedProductPreview}${unmatchedImagePreview}`,
       );
+      setCatalogSourceProducts([]);
+      setCatalogSourceCategories([]);
+      setCatalogSourceTitle("Crockery Product Catalog");
       setImportFile(null);
       setImportImageFiles([]);
       setActiveSection("imports");
@@ -1330,6 +1511,7 @@ export default function AdminInventoryManager({
       }
 
       setLoadedOrder(payload.order);
+      setOrderLookupId(payload.order.orderId || orderLookupId.trim());
     } catch {
       setOrderLookupError("Unable to fetch order.");
       setLoadedOrder(null);
@@ -1338,8 +1520,47 @@ export default function AdminInventoryManager({
     }
   }
 
+  function updateLoadedOrderUnitPrice(itemId, nextValue) {
+    setLoadedOrder((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const items = current.items.map((item) => {
+        if (item.id !== itemId) {
+          return item;
+        }
+
+        const unitPriceInr = nextValue === "" ? "" : Number(nextValue);
+        const safeUnitPrice = unitPriceInr === "" || Number.isNaN(unitPriceInr) ? 0 : unitPriceInr;
+
+        return {
+          ...item,
+          unitPriceInr,
+          lineTotalInr: Number(item.quantity) * safeUnitPrice,
+        };
+      });
+
+      return {
+        ...current,
+        items,
+        totalAmountInr: calculateOrderTotal(items),
+      };
+    });
+  }
+
   async function confirmLoadedOrder() {
     if (!loadedOrder?.orderId) {
+      return;
+    }
+
+    const hasInvalidPrice = loadedOrder.items.some((item) => {
+      const unitPriceInr = Number(item.unitPriceInr);
+      return !Number.isFinite(unitPriceInr) || unitPriceInr < 0;
+    });
+
+    if (hasInvalidPrice) {
+      setOrderLookupError("Each unit price must be a non-negative number before confirmation.");
       return;
     }
 
@@ -1349,6 +1570,15 @@ export default function AdminInventoryManager({
     try {
       const response = await fetch(`/api/admin/orders/${loadedOrder.orderId}/confirm`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: loadedOrder.items.map((item) => ({
+            id: item.id,
+            unitPriceInr: Number(item.unitPriceInr),
+          })),
+        }),
       });
       const payload = await response.json();
 
@@ -1363,6 +1593,81 @@ export default function AdminInventoryManager({
       setOrderLookupError("Unable to confirm order.");
     } finally {
       setIsConfirmingOrder(false);
+    }
+  }
+
+  async function reverseLoadedOrder() {
+    if (!loadedOrder?.orderId || loadedOrder.status !== "confirmed") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Reverse order ${loadedOrder.orderId}? Stock will be added back and the order will return to pending confirmation.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsReversingOrder(true);
+    setOrderLookupError("");
+
+    try {
+      const response = await fetch(`/api/admin/orders/${loadedOrder.orderId}/reverse`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setOrderLookupError(payload.error || "Unable to reverse order.");
+        return;
+      }
+
+      setLoadedOrder(payload.order);
+      await refreshDashboard();
+    } catch {
+      setOrderLookupError("Unable to reverse order.");
+    } finally {
+      setIsReversingOrder(false);
+    }
+  }
+
+  async function deleteLoadedOrder() {
+    if (!loadedOrder?.orderId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      loadedOrder.status === "confirmed"
+        ? `Delete confirmed order ${loadedOrder.orderId}? Stock will be restored before the order is permanently removed.`
+        : `Delete order ${loadedOrder.orderId}? This will permanently remove it from history.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingOrder(true);
+    setOrderLookupError("");
+
+    try {
+      const response = await fetch(`/api/admin/orders/${loadedOrder.orderId}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setOrderLookupError(payload.error || "Unable to delete order.");
+        return;
+      }
+
+      setLoadedOrder(null);
+      setOrderLookupId("");
+      await refreshDashboard();
+    } catch {
+      setOrderLookupError("Unable to delete order.");
+    } finally {
+      setIsDeletingOrder(false);
     }
   }
 
@@ -1606,7 +1911,7 @@ export default function AdminInventoryManager({
                           </p>
                           <p className="mt-2 text-sm text-gray-500">
                             {product.qtyPerCtn && product.ctn
-                              ? `${product.name}, ${product.qtyPerCtn} In ${product.ctn}`
+                              ? `${product.name}, ${product.qtyPerCtn} In CTN`
                               : product.name}
                             {product.catalogUnit ? `, For ${product.catalogUnit}` : ""}
                           </p>
@@ -1724,7 +2029,7 @@ export default function AdminInventoryManager({
               </p>
               <h3 className="mt-2 text-3xl font-bold">Order Confirmation Desk</h3>
               <p className="mt-2 text-gray-500">
-                Paste the order ID shared by the customer, review the pending items, then confirm payment and stock deduction.
+                Paste the order ID shared by the customer, review the items, adjust unit prices if needed, then confirm, reverse, or delete the order.
               </p>
 
               <div className="mt-6 flex flex-col gap-3 md:flex-row">
@@ -1781,34 +2086,90 @@ export default function AdminInventoryManager({
                     {loadedOrder.items.map((item) => (
                       <div
                         key={`${loadedOrder.orderId}-${item.productId}`}
-                        className="flex items-center justify-between rounded-2xl bg-white p-4"
+                        className="flex flex-col gap-4 rounded-2xl bg-white p-4 md:flex-row md:items-center md:justify-between"
                       >
                         <div>
                           <p className="font-semibold text-gray-900">{item.productName}</p>
                           <p className="text-sm text-gray-500">{item.productCode}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-500">Qty {item.quantity}</p>
-                          <p className="font-semibold text-gray-900">
-                            {formatCurrency(item.lineTotalInr)}
-                          </p>
+                        <div className="flex items-center gap-4 md:gap-6">
+                          <div className="text-sm text-gray-500">Qty {item.quantity}</div>
+                          <label className="block">
+                            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                              Unit Price
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={item.unitPriceInr}
+                              onChange={(event) =>
+                                updateLoadedOrderUnitPrice(item.id, event.target.value)
+                              }
+                              disabled={
+                                loadedOrder.status === "confirmed" ||
+                                isConfirmingOrder ||
+                                isReversingOrder ||
+                                isDeletingOrder
+                              }
+                              className="mt-2 w-32 rounded-xl border border-stone-200 px-3 py-2 text-right text-sm text-stone-900 disabled:bg-stone-100"
+                            />
+                          </label>
+                          <div className="text-right">
+                            <p className="text-sm text-gray-500">Line Total</p>
+                            <p className="font-semibold text-gray-900">
+                              {formatCurrency(item.lineTotalInr)}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={confirmLoadedOrder}
-                    disabled={isConfirmingOrder || loadedOrder.status === "confirmed"}
-                    className="mt-6 rounded-2xl bg-green-600 px-6 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
-                  >
-                    {loadedOrder.status === "confirmed"
-                      ? "Order Already Confirmed"
-                      : isConfirmingOrder
-                        ? "Confirming..."
-                        : "Confirm Order and Payment"}
-                  </button>
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={confirmLoadedOrder}
+                      disabled={
+                        isConfirmingOrder ||
+                        isReversingOrder ||
+                        isDeletingOrder ||
+                        loadedOrder.status === "confirmed"
+                      }
+                      className="rounded-2xl bg-green-600 px-6 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
+                    >
+                      {loadedOrder.status === "confirmed"
+                        ? "Order Already Confirmed"
+                        : isConfirmingOrder
+                          ? "Confirming..."
+                          : "Confirm Order and Payment"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={reverseLoadedOrder}
+                      disabled={
+                        isConfirmingOrder ||
+                        isReversingOrder ||
+                        isDeletingOrder ||
+                        loadedOrder.status !== "confirmed"
+                      }
+                      className="rounded-2xl border border-amber-300 bg-amber-50 px-6 py-3 font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                    >
+                      {isReversingOrder ? "Reversing..." : "Reverse Confirmed Order"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deleteLoadedOrder}
+                      disabled={isConfirmingOrder || isReversingOrder || isDeletingOrder}
+                      className="rounded-2xl border border-red-300 bg-red-50 px-6 py-3 font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                    >
+                      {isDeletingOrder ? "Deleting..." : "Delete Order"}
+                    </button>
+                  </div>
+
+                  <p className="mt-3 text-sm text-gray-500">
+                    Confirmed orders are locked for price edits until you reverse them. Deleting a confirmed order restores its stock first.
+                  </p>
                 </div>
               ) : null}
             </section>
@@ -1851,13 +2212,54 @@ export default function AdminInventoryManager({
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-500">
                 Imports
               </p>
-              <h3 className="mt-2 text-3xl font-bold">Excel Inventory Import</h3>
+              <h3 className="mt-2 text-3xl font-bold">
+                {importWorkflow === "catalog" ? "Excel Catalog Builder" : "Excel Inventory Import"}
+              </h3>
               <p className="mt-2 text-gray-500">
-                Import a sheet when you want to bulk refresh inventory, or upload images alone to remap product photos by item number.
+                {importWorkflow === "catalog"
+                  ? "Import a sheet to build a printable catalog from Excel without changing inventory."
+                  : "Import a sheet when you want to bulk refresh inventory, or upload images alone to remap product photos by item number."}
               </p>
 
+              <div className="mt-6 inline-flex rounded-2xl bg-stone-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportWorkflow("inventory");
+                    setImportStatus("");
+                    setError("");
+                  }}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    importWorkflow === "inventory"
+                      ? "bg-white text-stone-900 shadow-sm"
+                      : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  Inventory Import
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportWorkflow("catalog");
+                    setImportStatus("");
+                    setError("");
+                  }}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    importWorkflow === "catalog"
+                      ? "bg-white text-stone-900 shadow-sm"
+                      : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  Catalog from Excel
+                </button>
+              </div>
+
               <div className="mt-8 rounded-[1.75rem] border border-dashed border-orange-200 bg-orange-50 p-6">
-                <p className="font-semibold text-gray-900">Upload Excel Inventory File</p>
+                <p className="font-semibold text-gray-900">
+                  {importWorkflow === "catalog"
+                    ? "Upload Excel Catalog File"
+                    : "Upload Excel Inventory File"}
+                </p>
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv"
@@ -1867,7 +2269,9 @@ export default function AdminInventoryManager({
                 <p className="mt-2 text-sm text-gray-500">
                   {importFile
                     ? `Selected sheet: ${importFile.name}`
-                    : "Choose a sheet, or skip it and upload only images. Import starts only when you click the button below."}
+                    : importWorkflow === "catalog"
+                      ? "Choose a sheet, then generate a catalog preview without importing products into inventory."
+                      : "Choose a sheet, or skip it and upload only images. Import starts only when you click the button below."}
                 </p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <label className="block rounded-[1.25rem] border border-orange-200 bg-white p-4">
@@ -1913,16 +2317,29 @@ export default function AdminInventoryManager({
                 <p className="mt-2 text-sm text-gray-500">
                   {importImageFiles.length > 0
                     ? `${importImageFiles.length} image file${importImageFiles.length === 1 ? "" : "s"} staged for item-number matching.`
-                    : "No separate images selected. You can import just images later to replace existing product photos by item number."}
+                    : importWorkflow === "catalog"
+                      ? "No separate images selected. You can still generate the catalog from text and pricing columns alone."
+                      : "No separate images selected. You can import just images later to replace existing product photos by item number."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={handleExcelUpload}
-                    disabled={(!importFile && importImageFiles.length === 0) || isImporting}
+                    disabled={
+                      (importWorkflow === "catalog"
+                        ? !importFile
+                        : !importFile && importImageFiles.length === 0) ||
+                      isImporting
+                    }
                     className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-300"
                   >
-                    {isImporting ? "Importing..." : "Start Import"}
+                    {isImporting
+                      ? importWorkflow === "catalog"
+                        ? "Generating..."
+                        : "Importing..."
+                      : importWorkflow === "catalog"
+                        ? "Generate Catalog"
+                        : "Start Import"}
                   </button>
                   <button
                     type="button"
@@ -1954,9 +2371,14 @@ export default function AdminInventoryManager({
 
         {activeSection === "catalog" ? (
           <CatalogMaker
-            products={products}
-            categories={categories}
-            initialTitle="Crockery Product Catalog"
+            products={catalogSourceProducts.length > 0 ? catalogSourceProducts : products}
+            categories={catalogSourceProducts.length > 0 ? catalogSourceCategories : categories}
+            initialTitle={
+              catalogSourceProducts.length > 0 ? catalogSourceTitle : "Crockery Product Catalog"
+            }
+            sourceLabel={
+              catalogSourceProducts.length > 0 ? "Imported Excel Rows" : "Database Products"
+            }
           />
         ) : null}
       </main>

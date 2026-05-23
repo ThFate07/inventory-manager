@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedAdmin } from "../../../../../../lib/auth";
-import { confirmOrder } from "../../../../../../lib/inventory";
+import { reverseConfirmedOrder } from "../../../../../../lib/inventory";
 
-export async function POST(request, { params }) {
+export async function POST(_request, { params }) {
   const admin = await getAuthenticatedAdmin();
 
   if (!admin) {
@@ -10,13 +10,12 @@ export async function POST(request, { params }) {
   }
 
   try {
-    const body = await request.json().catch(() => ({}));
     const { orderId } = await params;
-    const order = await confirmOrder(orderId, body);
+    const order = await reverseConfirmedOrder(orderId);
     return NextResponse.json({ order });
   } catch (error) {
     return NextResponse.json(
-      { error: error.message || "Unable to confirm order." },
+      { error: error.message || "Unable to reverse order." },
       { status: 400 },
     );
   }

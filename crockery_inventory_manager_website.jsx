@@ -84,7 +84,11 @@ function CustomerProductCard({
           </p>
         </div>
 
-        <h3 className="mt-2 text-sm font-bold leading-snug text-gray-900 sm:mt-3 sm:text-xl">{product.name}</h3>
+        <h3 className="mt-2 text-sm font-bold leading-snug text-gray-900 sm:mt-3 sm:text-xl">
+          {product.qtyPerCtn && product.ctn
+            ? `${product.name}, ${product.qtyPerCtn} In CTN`
+            : product.name}
+        </h3>
         <p className="mt-2 text-sm font-bold text-green-600 sm:mt-4 sm:text-lg">
           {formatCurrency(product.unitPriceInr)}
         </p>
@@ -225,7 +229,7 @@ export default function CrockeryInventoryManager({
               Customer Catalog
             </p>
             <h1 className="mt-1 text-2xl font-bold text-orange-600 sm:text-4xl">
-              Inventory Manager
+              Deen Enterprise
             </h1>
             <p className="mt-1 max-w-2xl text-xs text-gray-500 sm:mt-2 sm:text-base">
               Browse products and build a cart here, then place your pending order on the separate checkout page.

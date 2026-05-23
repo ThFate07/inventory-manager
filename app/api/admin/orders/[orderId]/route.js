@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedAdmin } from "../../../../../lib/auth";
-import { getOrderByOrderId } from "../../../../../lib/inventory";
+import { deleteOrder, getOrderByOrderId } from "../../../../../lib/inventory";
 
 export async function GET(_request, { params }) {
   const admin = await getAuthenticatedAdmin();
@@ -21,6 +21,25 @@ export async function GET(_request, { params }) {
   } catch (error) {
     return NextResponse.json(
       { error: error.message || "Unable to load order." },
+      { status: 400 },
+    );
+  }
+}
+
+export async function DELETE(_request, { params }) {
+  const admin = await getAuthenticatedAdmin();
+
+  if (!admin) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  try {
+    const { orderId } = await params;
+    const result = await deleteOrder(orderId);
+    return NextResponse.json({ ok: true, ...result });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message || "Unable to delete order." },
       { status: 400 },
     );
   }
