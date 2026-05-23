@@ -51,6 +51,13 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function calculateOrderTotal(items = []) {
+  return items.reduce(
+    (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPriceInr || 0),
+    0,
+  );
+}
+
 function normalizeCodeKey(value) {
   return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
 }
@@ -371,7 +378,11 @@ function getLogTone(action) {
 
   if (
     action === "stock_deducted_from_order" ||
+    action === "stock_restored_from_order" ||
     action === "order_confirmed" ||
+    action === "order_reversed" ||
+    action === "order_deleted" ||
+    action === "orders_restocked_before_clear" ||
     action === "orders_cleared" ||
     action === "import_image_unmatched_file" ||
     action === "products_cleared"
@@ -397,8 +408,12 @@ function getLogLabel(action) {
     import_image_unmatched_file: "Unused Image",
     products_cleared: "Cleared All",
     orders_cleared: "Orders Cleared",
+    orders_restocked_before_clear: "Orders Restocked",
     stock_deducted_from_order: "Stock Deducted",
+    stock_restored_from_order: "Stock Restored",
     order_confirmed: "Order Confirmed",
+    order_reversed: "Order Reversed",
+    order_deleted: "Order Deleted",
     inventory_import_summary: "Import Summary",
   };
 
@@ -422,7 +437,11 @@ function getLogType(action) {
 
   if (
     action === "stock_deducted_from_order" ||
+    action === "stock_restored_from_order" ||
     action === "order_confirmed" ||
+    action === "order_reversed" ||
+    action === "order_deleted" ||
+    action === "orders_restocked_before_clear" ||
     action === "orders_cleared"
   ) {
     return "order";
@@ -586,7 +605,9 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
                                 <p className="text-sm text-stone-500">{item.productCode}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-sm text-stone-500">Qty {item.quantity}</p>
+                                <p className="text-sm text-stone-500">
+                                  Qty {item.quantity} x {formatCurrency(item.unitPriceInr)}
+                                </p>
                                 <p className="font-semibold text-stone-900">
                                   {formatCurrency(item.lineTotalInr)}
                                 </p>
@@ -840,6 +861,8 @@ export default function AdminInventoryManager({
   const [orderLookupError, setOrderLookupError] = useState("");
   const [isLoadingOrder, setIsLoadingOrder] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
+  const [isReversingOrder, setIsReversingOrder] = useState(false);
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
   const [loadedOrder, setLoadedOrder] = useState(null);
   const [importWorkflow, setImportWorkflow] = useState("inventory");
   const [importFile, setImportFile] = useState(null);
@@ -1488,6 +1511,7 @@ export default function AdminInventoryManager({
       }
 
       setLoadedOrder(payload.order);
+      setOrderLookupId(payload.order.orderId || orderLookupId.trim());
     } catch {
       setOrderLookupError("Unable to fetch order.");
       setLoadedOrder(null);
@@ -1496,8 +1520,47 @@ export default function AdminInventoryManager({
     }
   }
 
+  function updateLoadedOrderUnitPrice(itemId, nextValue) {
+    setLoadedOrder((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const items = current.items.map((item) => {
+        if (item.id !== itemId) {
+          return item;
+        }
+
+        const unitPriceInr = nextValue === "" ? "" : Number(nextValue);
+        const safeUnitPrice = unitPriceInr === "" || Number.isNaN(unitPriceInr) ? 0 : unitPriceInr;
+
+        return {
+          ...item,
+          unitPriceInr,
+          lineTotalInr: Number(item.quantity) * safeUnitPrice,
+        };
+      });
+
+      return {
+        ...current,
+        items,
+        totalAmountInr: calculateOrderTotal(items),
+      };
+    });
+  }
+
   async function confirmLoadedOrder() {
     if (!loadedOrder?.orderId) {
+      return;
+    }
+
+    const hasInvalidPrice = loadedOrder.items.some((item) => {
+      const unitPriceInr = Number(item.unitPriceInr);
+      return !Number.isFinite(unitPriceInr) || unitPriceInr < 0;
+    });
+
+    if (hasInvalidPrice) {
+      setOrderLookupError("Each unit price must be a non-negative number before confirmation.");
       return;
     }
 
@@ -1507,6 +1570,15 @@ export default function AdminInventoryManager({
     try {
       const response = await fetch(`/api/admin/orders/${loadedOrder.orderId}/confirm`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: loadedOrder.items.map((item) => ({
+            id: item.id,
+            unitPriceInr: Number(item.unitPriceInr),
+          })),
+        }),
       });
       const payload = await response.json();
 
@@ -1521,6 +1593,81 @@ export default function AdminInventoryManager({
       setOrderLookupError("Unable to confirm order.");
     } finally {
       setIsConfirmingOrder(false);
+    }
+  }
+
+  async function reverseLoadedOrder() {
+    if (!loadedOrder?.orderId || loadedOrder.status !== "confirmed") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Reverse order ${loadedOrder.orderId}? Stock will be added back and the order will return to pending confirmation.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsReversingOrder(true);
+    setOrderLookupError("");
+
+    try {
+      const response = await fetch(`/api/admin/orders/${loadedOrder.orderId}/reverse`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setOrderLookupError(payload.error || "Unable to reverse order.");
+        return;
+      }
+
+      setLoadedOrder(payload.order);
+      await refreshDashboard();
+    } catch {
+      setOrderLookupError("Unable to reverse order.");
+    } finally {
+      setIsReversingOrder(false);
+    }
+  }
+
+  async function deleteLoadedOrder() {
+    if (!loadedOrder?.orderId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      loadedOrder.status === "confirmed"
+        ? `Delete confirmed order ${loadedOrder.orderId}? Stock will be restored before the order is permanently removed.`
+        : `Delete order ${loadedOrder.orderId}? This will permanently remove it from history.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingOrder(true);
+    setOrderLookupError("");
+
+    try {
+      const response = await fetch(`/api/admin/orders/${loadedOrder.orderId}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setOrderLookupError(payload.error || "Unable to delete order.");
+        return;
+      }
+
+      setLoadedOrder(null);
+      setOrderLookupId("");
+      await refreshDashboard();
+    } catch {
+      setOrderLookupError("Unable to delete order.");
+    } finally {
+      setIsDeletingOrder(false);
     }
   }
 
@@ -1882,7 +2029,7 @@ export default function AdminInventoryManager({
               </p>
               <h3 className="mt-2 text-3xl font-bold">Order Confirmation Desk</h3>
               <p className="mt-2 text-gray-500">
-                Paste the order ID shared by the customer, review the pending items, then confirm payment and stock deduction.
+                Paste the order ID shared by the customer, review the items, adjust unit prices if needed, then confirm, reverse, or delete the order.
               </p>
 
               <div className="mt-6 flex flex-col gap-3 md:flex-row">
@@ -1939,34 +2086,90 @@ export default function AdminInventoryManager({
                     {loadedOrder.items.map((item) => (
                       <div
                         key={`${loadedOrder.orderId}-${item.productId}`}
-                        className="flex items-center justify-between rounded-2xl bg-white p-4"
+                        className="flex flex-col gap-4 rounded-2xl bg-white p-4 md:flex-row md:items-center md:justify-between"
                       >
                         <div>
                           <p className="font-semibold text-gray-900">{item.productName}</p>
                           <p className="text-sm text-gray-500">{item.productCode}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-500">Qty {item.quantity}</p>
-                          <p className="font-semibold text-gray-900">
-                            {formatCurrency(item.lineTotalInr)}
-                          </p>
+                        <div className="flex items-center gap-4 md:gap-6">
+                          <div className="text-sm text-gray-500">Qty {item.quantity}</div>
+                          <label className="block">
+                            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                              Unit Price
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={item.unitPriceInr}
+                              onChange={(event) =>
+                                updateLoadedOrderUnitPrice(item.id, event.target.value)
+                              }
+                              disabled={
+                                loadedOrder.status === "confirmed" ||
+                                isConfirmingOrder ||
+                                isReversingOrder ||
+                                isDeletingOrder
+                              }
+                              className="mt-2 w-32 rounded-xl border border-stone-200 px-3 py-2 text-right text-sm text-stone-900 disabled:bg-stone-100"
+                            />
+                          </label>
+                          <div className="text-right">
+                            <p className="text-sm text-gray-500">Line Total</p>
+                            <p className="font-semibold text-gray-900">
+                              {formatCurrency(item.lineTotalInr)}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={confirmLoadedOrder}
-                    disabled={isConfirmingOrder || loadedOrder.status === "confirmed"}
-                    className="mt-6 rounded-2xl bg-green-600 px-6 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
-                  >
-                    {loadedOrder.status === "confirmed"
-                      ? "Order Already Confirmed"
-                      : isConfirmingOrder
-                        ? "Confirming..."
-                        : "Confirm Order and Payment"}
-                  </button>
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={confirmLoadedOrder}
+                      disabled={
+                        isConfirmingOrder ||
+                        isReversingOrder ||
+                        isDeletingOrder ||
+                        loadedOrder.status === "confirmed"
+                      }
+                      className="rounded-2xl bg-green-600 px-6 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
+                    >
+                      {loadedOrder.status === "confirmed"
+                        ? "Order Already Confirmed"
+                        : isConfirmingOrder
+                          ? "Confirming..."
+                          : "Confirm Order and Payment"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={reverseLoadedOrder}
+                      disabled={
+                        isConfirmingOrder ||
+                        isReversingOrder ||
+                        isDeletingOrder ||
+                        loadedOrder.status !== "confirmed"
+                      }
+                      className="rounded-2xl border border-amber-300 bg-amber-50 px-6 py-3 font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                    >
+                      {isReversingOrder ? "Reversing..." : "Reverse Confirmed Order"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deleteLoadedOrder}
+                      disabled={isConfirmingOrder || isReversingOrder || isDeletingOrder}
+                      className="rounded-2xl border border-red-300 bg-red-50 px-6 py-3 font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                    >
+                      {isDeletingOrder ? "Deleting..." : "Delete Order"}
+                    </button>
+                  </div>
+
+                  <p className="mt-3 text-sm text-gray-500">
+                    Confirmed orders are locked for price edits until you reverse them. Deleting a confirmed order restores its stock first.
+                  </p>
                 </div>
               ) : null}
             </section>
