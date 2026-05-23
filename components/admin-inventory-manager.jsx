@@ -1764,7 +1764,7 @@ export default function AdminInventoryManager({
                           </p>
                           <p className="mt-2 text-sm text-gray-500">
                             {product.qtyPerCtn && product.ctn
-                              ? `${product.name}, ${product.qtyPerCtn} In ${product.ctn}`
+                              ? `${product.name}, ${product.qtyPerCtn} In CTN`
                               : product.name}
                             {product.catalogUnit ? `, For ${product.catalogUnit}` : ""}
                           </p>

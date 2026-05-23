@@ -84,7 +84,11 @@ function CustomerProductCard({
           </p>
         </div>
 
-        <h3 className="mt-2 text-sm font-bold leading-snug text-gray-900 sm:mt-3 sm:text-xl">{product.name}</h3>
+        <h3 className="mt-2 text-sm font-bold leading-snug text-gray-900 sm:mt-3 sm:text-xl">
+          {product.qtyPerCtn && product.ctn
+            ? `${product.name}, ${product.qtyPerCtn} In CTN`
+            : product.name}
+        </h3>
         <p className="mt-2 text-sm font-bold text-green-600 sm:mt-4 sm:text-lg">
           {formatCurrency(product.unitPriceInr)}
         </p>
