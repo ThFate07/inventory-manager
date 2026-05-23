@@ -6,7 +6,7 @@ export const metadata = {
 };
 
 export default async function CheckoutPage() {
-  const products = await listProducts();
+  const products = await listProducts({ proxyImages: true });
 
   return <CustomerCheckout initialProducts={products} />;
 }

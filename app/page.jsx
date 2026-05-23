@@ -3,7 +3,7 @@ import { listCategories, listProducts } from "../lib/inventory";
 
 export default async function Page() {
   const [products, categories] = await Promise.all([
-    listProducts(),
+    listProducts({ proxyImages: true }),
     listCategories(),
   ]);
 
