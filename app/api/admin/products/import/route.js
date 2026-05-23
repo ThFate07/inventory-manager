@@ -13,12 +13,22 @@ export async function POST(request) {
     const body = await request.json();
     const products = Array.isArray(body.products) ? body.products : [];
     const importMode = body.importMode === "images-only" ? "images-only" : "sheet";
+    const returnSnapshot = body.returnSnapshot !== false;
     const importReport = {
       unmatchedProducts: Array.isArray(body.unmatchedProducts) ? body.unmatchedProducts : [],
       unmatchedImages: Array.isArray(body.unmatchedImages) ? body.unmatchedImages : [],
     };
 
-    await importProducts(products, importReport, { importMode });
+    await importProducts(products, importReport, {
+      importMode,
+      logUnmatched: body.logUnmatched !== false,
+      logSummary: body.logSummary !== false,
+      summaryProductCount: body.summaryProductCount,
+    });
+
+    if (!returnSnapshot) {
+      return NextResponse.json({ ok: true });
+    }
 
     const [updatedProducts, categories] = await Promise.all([
       listProducts({ admin: true }),

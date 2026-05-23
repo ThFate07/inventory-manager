@@ -202,6 +202,37 @@ function getImportErrorMessage(error, fallbackMessage) {
   return fallbackMessage;
 }
 
+function getJsonByteLength(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+function chunkProductsForImport(products, basePayload, maxBytes = 3_500_000) {
+  const chunks = [];
+  let currentChunk = [];
+
+  for (const product of products) {
+    const nextChunk = [...currentChunk, product];
+    const nextPayload = {
+      ...basePayload,
+      products: nextChunk,
+    };
+
+    if (currentChunk.length > 0 && getJsonByteLength(nextPayload) > maxBytes) {
+      chunks.push(currentChunk);
+      currentChunk = [product];
+      continue;
+    }
+
+    currentChunk = nextChunk;
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
 function StatusPill({ children, tone = "neutral" }) {
   const toneClassName =
     tone === "success"
@@ -1027,27 +1058,61 @@ export default function AdminInventoryManager({
         return;
       }
 
-      const response = await fetch("/api/admin/products/import", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          products: normalizedProducts,
-          unmatchedProducts,
-          unmatchedImages,
-          importMode: importFile ? "sheet" : "images-only",
-        }),
-      });
+      const importMode = importFile ? "sheet" : "images-only";
+      const basePayload = {
+        importMode,
+        unmatchedProducts: [],
+        unmatchedImages: [],
+        logUnmatched: false,
+        logSummary: false,
+        returnSnapshot: false,
+      };
+      const productChunks = chunkProductsForImport(normalizedProducts, basePayload);
 
-      const payload = await parseImportResponse(response);
+      if (productChunks.length === 0) {
+        throw new Error("No importable products were prepared.");
+      }
 
-      if (!response.ok) {
-        setError(
-          payload.error ||
-            `Import failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`,
+      if (productChunks.some((chunk) => chunk.length === 1 && getJsonByteLength({ ...basePayload, products: chunk }) > 3_500_000)) {
+        throw new Error(
+          "At least one product image is still too large for Vercel to accept. Reduce the image size and try again.",
         );
-        return;
+      }
+
+      for (const [index, productChunk] of productChunks.entries()) {
+        const isFinalChunk = index === productChunks.length - 1;
+        const response = await fetch("/api/admin/products/import", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            products: productChunk,
+            unmatchedProducts: isFinalChunk ? unmatchedProducts : [],
+            unmatchedImages: isFinalChunk ? unmatchedImages : [],
+            importMode,
+            logUnmatched: isFinalChunk,
+            logSummary: isFinalChunk,
+            summaryProductCount: isFinalChunk ? normalizedProducts.length : undefined,
+            returnSnapshot: false,
+          }),
+        });
+
+        const payload = await parseImportResponse(response);
+
+        if (!response.ok) {
+          setError(
+            payload.error ||
+              `Import failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`,
+          );
+          return;
+        }
+
+        if (productChunks.length > 1) {
+          setImportStatus(
+            `Uploading import batch ${index + 1} of ${productChunks.length}...`,
+          );
+        }
       }
 
       await refreshDashboard();
