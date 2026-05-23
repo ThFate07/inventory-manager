@@ -1905,10 +1905,7 @@ export default function AdminInventoryManager({
 
                         <div>
                           <h4 className="text-xl font-bold">{product.name}</h4>
-                          <p className="mt-2 text-sm leading-6 text-gray-500">
-                            Stock level is {product.stockQuantity}. Use the edit action below to update
-                            pricing, categorization, or imagery.
-                          </p>
+                          
                           <p className="mt-2 text-sm text-gray-500">
                             {product.qtyPerCtn && product.ctn
                               ? `${product.name}, ${product.qtyPerCtn} In CTN`
