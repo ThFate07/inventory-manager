@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import CatalogMaker from "../catalog_maker";
+
+const CATALOG_SOURCE_STORAGE_KEY = "admin-catalog-source";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Dashboard" },
@@ -68,6 +70,104 @@ function fileNameToCodeKey(fileName) {
   const withoutExtension = String(fileName || "").replace(/\.[^.]+$/, "").trim();
   const withoutIndexSuffix = withoutExtension.replace(/\s*\(\d+\)\s*$/, "").trim();
   return normalizeCodeKey(withoutIndexSuffix || withoutExtension);
+}
+
+function readCatalogSourceFromStorage() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(CATALOG_SOURCE_STORAGE_KEY);
+    return rawValue ? JSON.parse(rawValue) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCatalogSourceToStorage(value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!value) {
+    window.sessionStorage.removeItem(CATALOG_SOURCE_STORAGE_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(CATALOG_SOURCE_STORAGE_KEY, JSON.stringify(value));
+}
+
+function getImportedImageUrl(item) {
+  return normalizeImportedCell(
+    item["IMAGE URL"] ||
+      item["IMAGE"] ||
+      item["IMG"] ||
+      item.imageUrl ||
+      item.image ||
+      item.ImageUrl ||
+      item.Image ||
+      "",
+  );
+}
+
+function buildWorkbookCatalogProducts(rows, imageDataByCode = new Map()) {
+  return rows.map((item, index) => {
+    const code = getImportedItemCode(item) || `ROW-${index + 1}`;
+    const normalizedCodeKey = normalizeCodeKey(code);
+
+    return {
+      id: index + 1,
+      code,
+      name: getImportedItemName(item) || "Unnamed Product",
+      category: item.category || item.Category || "General",
+      ctn: item.CTN || item.ctn || item.Ctn || "",
+      qtyPerCtn: item["QTY/CTN"] || item.qtyPerCtn || item.QtyPerCtn || item.qtyPerCTN || "",
+      catalogUnit:
+        item.FOR ||
+        item.for ||
+        item.For ||
+        item.catalogUnit ||
+        item.CatalogUnit ||
+        item.catalogQtyLabel ||
+        item.CatalogQtyLabel ||
+        item.qtyLabel ||
+        item.QtyLabel ||
+        item.pack ||
+        item.Pack ||
+        "1 pcs",
+      stockQuantity: Number(
+        item["TOTAL QTY"] ||
+          item.totalQty ||
+          item.TotalQty ||
+          item.stockQuantity ||
+          item.stock ||
+          item.StockQuantity ||
+          item.Stock ||
+          0,
+      ),
+      unitPriceInr: Number(item["UNIT PRICE"] || item.unitPriceInr || item.price || item.Price || 0),
+      imageUrl: imageDataByCode.get(normalizedCodeKey) || getImportedImageUrl(item) || "",
+    };
+  });
+}
+
+function buildCatalogCategories(products) {
+  const categoryMap = new Map();
+
+  for (const product of products) {
+    const name = String(product.category || "General").trim() || "General";
+    const key = normalizeCodeKey(name);
+
+    if (!categoryMap.has(key)) {
+      categoryMap.set(key, {
+        id: key || name,
+        name,
+      });
+    }
+  }
+
+  return Array.from(categoryMap.values());
 }
 
 async function parseJsonResponse(response) {
@@ -741,12 +841,35 @@ export default function AdminInventoryManager({
   const [isLoadingOrder, setIsLoadingOrder] = useState(false);
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [loadedOrder, setLoadedOrder] = useState(null);
+  const [importWorkflow, setImportWorkflow] = useState("inventory");
   const [importFile, setImportFile] = useState(null);
   const [importImageFiles, setImportImageFiles] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState("");
   const [isClearingProducts, setIsClearingProducts] = useState(false);
   const [isClearingOrders, setIsClearingOrders] = useState(false);
+  const [catalogSourceProducts, setCatalogSourceProducts] = useState(
+    () => readCatalogSourceFromStorage()?.products || [],
+  );
+  const [catalogSourceCategories, setCatalogSourceCategories] = useState(
+    () => readCatalogSourceFromStorage()?.categories || [],
+  );
+  const [catalogSourceTitle, setCatalogSourceTitle] = useState(
+    () => readCatalogSourceFromStorage()?.title || "Crockery Product Catalog",
+  );
+
+  useEffect(() => {
+    if (catalogSourceProducts.length === 0) {
+      writeCatalogSourceToStorage(null);
+      return;
+    }
+
+    writeCatalogSourceToStorage({
+      products: catalogSourceProducts,
+      categories: catalogSourceCategories,
+      title: catalogSourceTitle,
+    });
+  }, [catalogSourceCategories, catalogSourceProducts, catalogSourceTitle]);
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -934,8 +1057,17 @@ export default function AdminInventoryManager({
   }
 
   async function handleExcelUpload() {
+    if (importWorkflow === "catalog" && !importFile) {
+      setError("Select an Excel file before generating the catalog.");
+      return;
+    }
+
     if (!importFile && importImageFiles.length === 0) {
-      setError("Select an Excel file or at least one image before starting the import.");
+      setError(
+        importWorkflow === "catalog"
+          ? "Select an Excel file or at least one image before generating the catalog."
+          : "Select an Excel file or at least one image before starting the import.",
+      );
       return;
     }
 
@@ -987,7 +1119,9 @@ export default function AdminInventoryManager({
       const importSourceRows =
         rows.length > 0
           ? rows
-          : products.map((product) => ({
+          : importWorkflow === "catalog"
+            ? []
+            : products.map((product) => ({
               id: product.id,
               "ITEM NO": product.code,
               DESCRIPTION: product.name,
@@ -1017,7 +1151,7 @@ export default function AdminInventoryManager({
 
       if (matchedFilesByCode.size > 0) {
         setImportStatus(
-          `Uploading ${matchedFilesByCode.size} matched image${matchedFilesByCode.size === 1 ? "" : "s"} to Blob...`,
+          `Uploading ${matchedFilesByCode.size} matched image${matchedFilesByCode.size === 1 ? "" : "s"} to cloud storage...`,
         );
       }
 
@@ -1096,7 +1230,28 @@ export default function AdminInventoryManager({
         }));
 
       if (normalizedProducts.length === 0) {
-        setError("No products matched the uploaded image names.");
+        setError(
+          importWorkflow === "catalog"
+            ? "No importable catalog rows were found in the selected sheet."
+            : "No products matched the uploaded image names.",
+        );
+        return;
+      }
+
+      if (importWorkflow === "catalog") {
+        const catalogProducts = buildWorkbookCatalogProducts(importSourceRows, imageDataByCode);
+        const catalogCategories = buildCatalogCategories(catalogProducts);
+        const catalogTitleBase = String(importFile?.name || "Imported Catalog").replace(/\.[^.]+$/, "");
+
+        setCatalogSourceProducts(catalogProducts);
+        setCatalogSourceCategories(catalogCategories);
+        setCatalogSourceTitle(catalogTitleBase || "Imported Catalog");
+        setImportStatus(
+          `Prepared ${catalogProducts.length} catalog item${catalogProducts.length === 1 ? "" : "s"} from ${importFile?.name || "the selected sheet"}.`,
+        );
+        setImportFile(null);
+        setImportImageFiles([]);
+        setActiveSection("catalog");
         return;
       }
 
@@ -1163,6 +1318,9 @@ export default function AdminInventoryManager({
       setImportStatus(
         `${importFile ? `Imported ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"}` : `Updated ${normalizedProducts.length} product image${normalizedProducts.length === 1 ? "" : "s"}`} successfully${importImageFiles.length > 0 ? ` with ${matchedRowCodes.size} matched image${matchedRowCodes.size === 1 ? "" : "s"}` : ""}.${unmatchedProductPreview}${unmatchedImagePreview}`,
       );
+      setCatalogSourceProducts([]);
+      setCatalogSourceCategories([]);
+      setCatalogSourceTitle("Crockery Product Catalog");
       setImportFile(null);
       setImportImageFiles([]);
       setActiveSection("imports");
@@ -1851,13 +2009,54 @@ export default function AdminInventoryManager({
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-500">
                 Imports
               </p>
-              <h3 className="mt-2 text-3xl font-bold">Excel Inventory Import</h3>
+              <h3 className="mt-2 text-3xl font-bold">
+                {importWorkflow === "catalog" ? "Excel Catalog Builder" : "Excel Inventory Import"}
+              </h3>
               <p className="mt-2 text-gray-500">
-                Import a sheet when you want to bulk refresh inventory, or upload images alone to remap product photos by item number.
+                {importWorkflow === "catalog"
+                  ? "Import a sheet to build a printable catalog from Excel without changing inventory."
+                  : "Import a sheet when you want to bulk refresh inventory, or upload images alone to remap product photos by item number."}
               </p>
 
+              <div className="mt-6 inline-flex rounded-2xl bg-stone-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportWorkflow("inventory");
+                    setImportStatus("");
+                    setError("");
+                  }}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    importWorkflow === "inventory"
+                      ? "bg-white text-stone-900 shadow-sm"
+                      : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  Inventory Import
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportWorkflow("catalog");
+                    setImportStatus("");
+                    setError("");
+                  }}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    importWorkflow === "catalog"
+                      ? "bg-white text-stone-900 shadow-sm"
+                      : "text-stone-500 hover:text-stone-900"
+                  }`}
+                >
+                  Catalog from Excel
+                </button>
+              </div>
+
               <div className="mt-8 rounded-[1.75rem] border border-dashed border-orange-200 bg-orange-50 p-6">
-                <p className="font-semibold text-gray-900">Upload Excel Inventory File</p>
+                <p className="font-semibold text-gray-900">
+                  {importWorkflow === "catalog"
+                    ? "Upload Excel Catalog File"
+                    : "Upload Excel Inventory File"}
+                </p>
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv"
@@ -1867,7 +2066,9 @@ export default function AdminInventoryManager({
                 <p className="mt-2 text-sm text-gray-500">
                   {importFile
                     ? `Selected sheet: ${importFile.name}`
-                    : "Choose a sheet, or skip it and upload only images. Import starts only when you click the button below."}
+                    : importWorkflow === "catalog"
+                      ? "Choose a sheet, then generate a catalog preview without importing products into inventory."
+                      : "Choose a sheet, or skip it and upload only images. Import starts only when you click the button below."}
                 </p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <label className="block rounded-[1.25rem] border border-orange-200 bg-white p-4">
@@ -1913,16 +2114,29 @@ export default function AdminInventoryManager({
                 <p className="mt-2 text-sm text-gray-500">
                   {importImageFiles.length > 0
                     ? `${importImageFiles.length} image file${importImageFiles.length === 1 ? "" : "s"} staged for item-number matching.`
-                    : "No separate images selected. You can import just images later to replace existing product photos by item number."}
+                    : importWorkflow === "catalog"
+                      ? "No separate images selected. You can still generate the catalog from text and pricing columns alone."
+                      : "No separate images selected. You can import just images later to replace existing product photos by item number."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={handleExcelUpload}
-                    disabled={(!importFile && importImageFiles.length === 0) || isImporting}
+                    disabled={
+                      (importWorkflow === "catalog"
+                        ? !importFile
+                        : !importFile && importImageFiles.length === 0) ||
+                      isImporting
+                    }
                     className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-300"
                   >
-                    {isImporting ? "Importing..." : "Start Import"}
+                    {isImporting
+                      ? importWorkflow === "catalog"
+                        ? "Generating..."
+                        : "Importing..."
+                      : importWorkflow === "catalog"
+                        ? "Generate Catalog"
+                        : "Start Import"}
                   </button>
                   <button
                     type="button"
@@ -1954,9 +2168,14 @@ export default function AdminInventoryManager({
 
         {activeSection === "catalog" ? (
           <CatalogMaker
-            products={products}
-            categories={categories}
-            initialTitle="Crockery Product Catalog"
+            products={catalogSourceProducts.length > 0 ? catalogSourceProducts : products}
+            categories={catalogSourceProducts.length > 0 ? catalogSourceCategories : categories}
+            initialTitle={
+              catalogSourceProducts.length > 0 ? catalogSourceTitle : "Crockery Product Catalog"
+            }
+            sourceLabel={
+              catalogSourceProducts.length > 0 ? "Imported Excel Rows" : "Database Products"
+            }
           />
         ) : null}
       </main>

@@ -225,7 +225,7 @@ export default function CrockeryInventoryManager({
               Customer Catalog
             </p>
             <h1 className="mt-1 text-2xl font-bold text-orange-600 sm:text-4xl">
-              Inventory Manager
+              Deen Enterprise
             </h1>
             <p className="mt-1 max-w-2xl text-xs text-gray-500 sm:mt-2 sm:text-base">
               Browse products and build a cart here, then place your pending order on the separate checkout page.
