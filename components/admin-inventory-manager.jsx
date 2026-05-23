@@ -272,6 +272,7 @@ function getLogTone(action) {
   if (
     action === "stock_deducted_from_order" ||
     action === "order_confirmed" ||
+    action === "orders_cleared" ||
     action === "import_image_unmatched_file" ||
     action === "products_cleared"
   ) {
@@ -295,6 +296,7 @@ function getLogLabel(action) {
     import_image_unmatched_product: "Missing Image",
     import_image_unmatched_file: "Unused Image",
     products_cleared: "Cleared All",
+    orders_cleared: "Orders Cleared",
     stock_deducted_from_order: "Stock Deducted",
     order_confirmed: "Order Confirmed",
     inventory_import_summary: "Import Summary",
@@ -318,7 +320,11 @@ function getLogType(action) {
     return "product";
   }
 
-  if (action === "stock_deducted_from_order" || action === "order_confirmed") {
+  if (
+    action === "stock_deducted_from_order" ||
+    action === "order_confirmed" ||
+    action === "orders_cleared"
+  ) {
     return "order";
   }
 
@@ -740,6 +746,7 @@ export default function AdminInventoryManager({
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState("");
   const [isClearingProducts, setIsClearingProducts] = useState(false);
+  const [isClearingOrders, setIsClearingOrders] = useState(false);
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -1220,6 +1227,63 @@ export default function AdminInventoryManager({
     }
   }
 
+  async function handleClearOrders() {
+    setError("");
+    setImportStatus("");
+    setOrderLookupError("");
+
+    if (recentOrders.length === 0) {
+      setError("There are no orders to clear.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `This will permanently delete all ${recentOrders.length} orders from the admin order history. This cannot be undone. Continue?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const confirmationText = window.prompt(
+      "Type CLEAR ORDERS to permanently delete every order.",
+      "",
+    );
+
+    if (confirmationText !== "CLEAR ORDERS") {
+      setError("Bulk order delete cancelled. Type CLEAR ORDERS exactly to continue.");
+      return;
+    }
+
+    setIsClearingOrders(true);
+
+    try {
+      const response = await fetch("/api/admin/orders", {
+        method: "DELETE",
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setError(payload.error || "Could not clear orders.");
+        return;
+      }
+
+      setRecentOrders(payload.recentOrders || []);
+      setInventoryLogs(payload.inventoryLogs || []);
+      setLoadedOrder(null);
+      setOrderLookupId("");
+      setImportStatus(
+        `Cleared ${payload.deletedCount || 0} order${payload.deletedCount === 1 ? "" : "s"} from history.`,
+      );
+      await refreshDashboard();
+    } catch {
+      setError("Could not clear orders.");
+    } finally {
+      setIsClearingOrders(false);
+    }
+  }
+
   function handleImportImagesSelected(event) {
     const files = Array.from(event.target.files || []).filter((file) =>
       file.type.startsWith("image/"),
@@ -1633,8 +1697,16 @@ export default function AdminInventoryManager({
                     >
                       {isClearingProducts ? "Clearing products..." : "Clear all products"}
                     </button>
+                    <button
+                      type="button"
+                      onClick={handleClearOrders}
+                      disabled={isClearingOrders || recentOrders.length === 0}
+                      className="w-full rounded-2xl border border-red-400/60 bg-red-500/15 px-4 py-2.5 text-left text-sm font-semibold text-red-100 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-white/40"
+                    >
+                      {isClearingOrders ? "Clearing orders..." : "Clear all orders"}
+                    </button>
                     <p className="text-xs leading-5 text-red-100/80">
-                      Requires two confirmations and will be blocked if any product is tied to an existing order.
+                      Both destructive actions require two confirmations. Product clearing is blocked while products are tied to existing orders.
                     </p>
                   </div>
                 </div>
