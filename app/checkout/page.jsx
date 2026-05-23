@@ -1,6 +1,8 @@
 import CustomerCheckout from "../../components/customer-checkout";
 import { listProducts } from "../../lib/inventory";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Checkout | Crockery Inventory Manager",
 };

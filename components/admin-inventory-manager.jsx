@@ -70,13 +70,43 @@ function fileNameToCodeKey(fileName) {
   return normalizeCodeKey(withoutIndexSuffix || withoutExtension);
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-    reader.readAsDataURL(file);
+async function parseJsonResponse(response) {
+  const responseText = await response.text();
+
+  if (!responseText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return { error: responseText };
+  }
+}
+
+async function uploadImageFile(file, { productCode = "" } = {}) {
+  if (!file) {
+    throw new Error("Select an image file to upload.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  if (productCode) {
+    formData.append("productCode", productCode);
+  }
+
+  const response = await fetch("/api/admin/uploads/product-image", {
+    method: "POST",
+    body: formData,
   });
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok || !payload.url) {
+    throw new Error(payload.error || `Could not upload ${file.name}.`);
+  }
+
+  return payload.url;
 }
 
 function getImportedItemCode(item) {
@@ -174,20 +204,6 @@ function readWorksheetRows(XLSX, worksheet) {
       Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
     )
     .filter((row) => isImportableWorksheetRow(row));
-}
-
-async function parseImportResponse(response) {
-  const responseText = await response.text();
-
-  if (!responseText) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    return { error: responseText };
-  }
 }
 
 function getImportErrorMessage(error, fallbackMessage) {
@@ -851,7 +867,9 @@ export default function AdminInventoryManager({
         catalogUnit: form.catalogUnit,
         stockQuantity: Number(form.stockQuantity),
         unitPriceInr: Number(form.unitPriceInr),
-        imageUrl: form.imageFile ? await readFileAsDataUrl(form.imageFile) : form.imageUrl,
+        imageUrl: form.imageFile
+          ? await uploadImageFile(form.imageFile, { productCode: form.code })
+          : form.imageUrl,
       };
       const response = await fetch(
         form.id ? `/api/admin/products/${form.id}` : "/api/admin/products",
@@ -873,8 +891,8 @@ export default function AdminInventoryManager({
 
       closeModal();
       await refreshDashboard();
-    } catch {
-      setError("Could not save product.");
+    } catch (caughtError) {
+      setError(getImportErrorMessage(caughtError, "Could not save product."));
     } finally {
       setSaving(false);
     }
@@ -990,14 +1008,24 @@ export default function AdminInventoryManager({
         }
       }
 
+      if (matchedFilesByCode.size > 0) {
+        setImportStatus(
+          `Uploading ${matchedFilesByCode.size} matched image${matchedFilesByCode.size === 1 ? "" : "s"} to Blob...`,
+        );
+      }
+
       const imageDataByCode = new Map(
         await Promise.all(
-          Array.from(matchedFilesByCode.entries()).map(async ([codeKey, matchedFile]) => [
-            codeKey,
-            await readFileAsDataUrl(matchedFile),
-          ]),
+          Array.from(matchedFilesByCode.entries()).map(async ([codeKey, matchedFile]) => {
+            const uploadedUrl = await uploadImageFile(matchedFile, { productCode: codeKey });
+            return [codeKey, uploadedUrl];
+          }),
         ),
       );
+
+      if (matchedFilesByCode.size > 0) {
+        setImportStatus("Image upload complete. Saving product changes...");
+      }
 
       const unmatchedProducts =
         importImageFiles.length > 0
@@ -1080,12 +1108,6 @@ export default function AdminInventoryManager({
         throw new Error("No importable products were prepared.");
       }
 
-      if (productChunks.some((chunk) => chunk.length === 1 && getJsonByteLength({ ...basePayload, products: chunk }) > 3_500_000)) {
-        throw new Error(
-          "At least one product image is still too large for Vercel to accept. Reduce the image size and try again.",
-        );
-      }
-
       for (const [index, productChunk] of productChunks.entries()) {
         const isFinalChunk = index === productChunks.length - 1;
         const response = await fetch("/api/admin/products/import", {
@@ -1105,7 +1127,7 @@ export default function AdminInventoryManager({
           }),
         });
 
-        const payload = await parseImportResponse(response);
+        const payload = await parseJsonResponse(response);
 
         if (!response.ok) {
           setError(
