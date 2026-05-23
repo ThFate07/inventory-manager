@@ -147,35 +147,35 @@ export default function CustomerCheckout({ initialProducts = [] }) {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-100 px-6 py-12 text-gray-800">
-      <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="rounded-[2rem] bg-black p-10 text-white shadow-2xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-orange-300">
+    <main className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-100 px-4 py-6 pb-28 text-gray-800 sm:px-6 sm:py-12 sm:pb-12">
+      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:gap-8">
+        <section className="rounded-[2rem] bg-black p-6 text-white shadow-2xl sm:p-10">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-orange-300 sm:text-sm">
             Pending Checkout
           </p>
-          <h1 className="mt-4 text-5xl font-bold leading-tight">
+          <h1 className="mt-3 text-3xl font-bold leading-tight sm:mt-4 sm:text-5xl">
             Review the cart here and submit the order separately.
           </h1>
-          <p className="mt-5 max-w-xl text-lg text-white/70">
+          <p className="mt-4 max-w-xl text-sm text-white/70 sm:mt-5 sm:text-lg">
             Customers can place orders without payment. The order stays pending until the admin confirms the order ID and payment.
           </p>
           <a
             href="/"
-            className="mt-8 inline-block rounded-2xl border border-white/15 px-5 py-3 font-semibold text-white transition hover:bg-white/10"
+            className="mt-6 inline-flex h-11 items-center rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 sm:mt-8"
           >
             Back to Catalog
           </a>
         </section>
 
-        <section className="rounded-3xl bg-white p-8 shadow-2xl">
-          <h2 className="text-3xl font-bold text-gray-900">Checkout</h2>
-          <p className="mt-2 text-gray-500">
+        <section className="rounded-3xl bg-white p-5 shadow-2xl sm:p-8">
+          <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">Checkout</h2>
+          <p className="mt-2 text-sm text-gray-500 sm:text-base">
             Orders are submitted without payment and stay pending until the admin confirms them.
           </p>
 
           <div className="mt-6 space-y-4">
             {cart.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-orange-200 bg-orange-50 p-5 text-gray-500">
+              <div className="rounded-2xl border border-dashed border-orange-200 bg-orange-50 p-5 text-sm text-gray-500 sm:text-base">
                 Your cart is empty.
               </div>
             ) : (
@@ -184,7 +184,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                   key={item.productId}
                   className="rounded-2xl border border-orange-100 p-4"
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="font-semibold text-gray-900">{item.productName}</p>
                       <p className="text-sm text-gray-500">{item.productCode}</p>
@@ -192,13 +192,13 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.productId)}
-                      className="text-sm font-semibold text-red-500"
+                      className="self-start text-sm font-semibold text-red-500"
                     >
                       Remove
                     </button>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <input
                       type="number"
                       min="1"
@@ -206,9 +206,9 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                       onChange={(event) =>
                         updateCartQuantity(item.productId, event.target.value)
                       }
-                      className="w-24 rounded-xl border border-orange-200 px-3 py-2"
+                      className="h-11 w-full rounded-xl border border-orange-200 px-3 py-2 text-base sm:w-24"
                     />
-                    <p className="font-semibold text-green-600">
+                    <p className="text-base font-semibold text-green-600 sm:text-right">
                       {formatCurrency(item.unitPriceInr * item.quantity)}
                     </p>
                   </div>
@@ -218,28 +218,28 @@ export default function CustomerCheckout({ initialProducts = [] }) {
           </div>
 
           <div className="mt-6 rounded-2xl bg-stone-900 p-5 text-white">
-            <p className="text-sm uppercase tracking-[0.2em] text-orange-300">Pending Total</p>
-            <p className="mt-2 text-3xl font-bold">{formatCurrency(cartTotal)}</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-orange-300 sm:text-sm">Pending Total</p>
+            <p className="mt-2 text-2xl font-bold sm:text-3xl">{formatCurrency(cartTotal)}</p>
           </div>
 
-          <form onSubmit={handleCheckout} className="mt-6 space-y-4">
+          <form id="customer-checkout-form" onSubmit={handleCheckout} className="mt-6 space-y-4">
             <input
               value={checkoutForm.customerName}
               onChange={(event) => updateCheckoutField("customerName", event.target.value)}
-              className="w-full rounded-2xl border px-4 py-3"
+              className="h-12 w-full rounded-2xl border border-orange-200 px-4 py-3 text-base"
               placeholder="Customer Name"
               required
             />
             <input
               value={checkoutForm.customerPhone}
               onChange={(event) => updateCheckoutField("customerPhone", event.target.value)}
-              className="w-full rounded-2xl border px-4 py-3"
+              className="h-12 w-full rounded-2xl border border-orange-200 px-4 py-3 text-base"
               placeholder="Phone Number"
             />
             <textarea
               value={checkoutForm.notes}
               onChange={(event) => updateCheckoutField("notes", event.target.value)}
-              className="w-full rounded-2xl border px-4 py-3"
+              className="w-full rounded-2xl border border-orange-200 px-4 py-3 text-base"
               placeholder="Order notes"
               rows="3"
             />
@@ -253,7 +253,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
             <button
               type="submit"
               disabled={isPlacingOrder}
-              className="w-full rounded-2xl bg-black px-5 py-3 font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+              className="hidden h-12 w-full rounded-2xl bg-black px-5 py-3 font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400 sm:block"
             >
               {isPlacingOrder ? "Placing Order..." : "Checkout Without Payment"}
             </button>
@@ -271,6 +271,23 @@ export default function CustomerCheckout({ initialProducts = [] }) {
             </div>
           ) : null}
         </section>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-orange-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)] backdrop-blur sm:hidden">
+        <div className="mx-auto flex max-w-6xl items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-orange-500">Pending Total</p>
+            <p className="truncate text-sm font-semibold text-gray-900">{formatCurrency(cartTotal)}</p>
+          </div>
+          <button
+            type="submit"
+            form="customer-checkout-form"
+            disabled={isPlacingOrder || cart.length === 0}
+            className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-black px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-400"
+          >
+            {isPlacingOrder ? "Placing..." : "Place Order"}
+          </button>
+        </div>
       </div>
     </main>
   );
