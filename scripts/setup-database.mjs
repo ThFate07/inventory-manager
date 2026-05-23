@@ -91,7 +91,7 @@ async function main() {
     await client.query(`
       create table if not exists products (
         id bigserial primary key,
-        code text not null unique,
+        code text not null,
         name text not null,
         category_id bigint not null references categories(id) on delete restrict,
         ctn text not null default '',
@@ -103,6 +103,31 @@ async function main() {
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now()
       );
+    `);
+
+    await client.query(`
+      do $$
+      begin
+        if exists (
+          select 1
+          from pg_constraint
+          where conrelid = 'products'::regclass
+            and conname = 'products_code_key'
+        ) then
+          alter table products drop constraint products_code_key;
+        end if;
+      end $$;
+    `);
+
+    await client.query(`
+      create index if not exists products_code_idx
+      on products (code);
+    `);
+
+    await client.query(`
+      update products
+      set code = regexp_replace(code, '\s+', '', 'g')
+      where code ~ '\s';
     `);
 
     await client.query(`
@@ -141,40 +166,33 @@ async function main() {
       );
     }
 
-    for (const product of sampleProducts) {
-      const categoryResult = await client.query(
-        "select id from categories where name = $1",
-        [product.category],
-      );
+    const productCountResult = await client.query("select count(*)::int as count from products");
 
-      await client.query(
-        `
-          insert into products (code, name, category_id, ctn, qty_per_ctn, catalog_unit, stock_quantity, unit_price_inr, image_url)
-          values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          on conflict (code)
-          do update set
-            name = excluded.name,
-            category_id = excluded.category_id,
-            ctn = excluded.ctn,
-            qty_per_ctn = excluded.qty_per_ctn,
-            catalog_unit = excluded.catalog_unit,
-            stock_quantity = excluded.stock_quantity,
-            unit_price_inr = excluded.unit_price_inr,
-            image_url = excluded.image_url,
-            updated_at = now()
-        `,
-        [
-          product.code,
-          product.name,
-          categoryResult.rows[0].id,
-          product.ctn || "",
-          product.qtyPerCtn || "",
-          product.catalogUnit || "1 pcs",
-          product.stockQuantity,
-          product.unitPriceInr,
-          product.imageUrl,
-        ],
-      );
+    if (productCountResult.rows[0]?.count === 0) {
+      for (const product of sampleProducts) {
+        const categoryResult = await client.query(
+          "select id from categories where name = $1",
+          [product.category],
+        );
+
+        await client.query(
+          `
+            insert into products (code, name, category_id, ctn, qty_per_ctn, catalog_unit, stock_quantity, unit_price_inr, image_url)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `,
+          [
+            product.code,
+            product.name,
+            categoryResult.rows[0].id,
+            product.ctn || "",
+            product.qtyPerCtn || "",
+            product.catalogUnit || "1 pcs",
+            product.stockQuantity,
+            product.unitPriceInr,
+            product.imageUrl,
+          ],
+        );
+      }
     }
 
     const username = process.env.ADMIN_USERNAME || "admin";

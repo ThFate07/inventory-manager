@@ -53,6 +53,13 @@ function normalizeCodeKey(value) {
   return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
 }
 
+function normalizeImportHeader(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
 function normalizeItemCode(value) {
   return String(value || "").replace(/\s+/g, "").trim();
 }
@@ -74,13 +81,29 @@ function readFileAsDataUrl(file) {
 
 function getImportedItemCode(item) {
   return normalizeItemCode(
-    item["ITEM NO"] || item.itemNo || item.ItemNo || item.code || item.Code || "",
+    item["ITEM NO"] ||
+      item["ITEM NUMBER"] ||
+      item.itemNo ||
+      item.itemNumber ||
+      item.ItemNo ||
+      item.ItemNumber ||
+      item.code ||
+      item.Code ||
+      "",
   );
 }
 
 function getImportedItemName(item) {
   return normalizeImportedCell(
-    item.DESCRIPTION || item.description || item.Description || item.name || item.Name || "",
+    item.DESCRIPTION ||
+      item["ITEM NAME"] ||
+      item.description ||
+      item.Description ||
+      item.itemName ||
+      item.ItemName ||
+      item.name ||
+      item.Name ||
+      "",
   );
 }
 
@@ -117,16 +140,27 @@ function readWorksheetRows(XLSX, worksheet) {
     raw: false,
   });
 
-  const headerRowIndex = matrix.findIndex((row) =>
-    Array.isArray(row) && row.some((cell) => normalizeImportedCell(cell) !== ""),
-  );
+  const headerRowIndex = matrix.findIndex((row) => {
+    if (!Array.isArray(row)) {
+      return false;
+    }
+
+    const normalizedHeaders = row.map((cell) => normalizeImportHeader(cell));
+    return (
+      normalizedHeaders.includes("ITEM NO") ||
+      normalizedHeaders.includes("ITEM NUMBER") ||
+      normalizedHeaders.includes("DESCRIPTION")
+    );
+  });
 
   if (headerRowIndex === -1) {
-    return [];
+    throw new Error(
+      "Could not find a header row. Include columns like ITEM NO, DESCRIPTION, TOTAL QTY, and UNIT PRICE.",
+    );
   }
 
   const headers = matrix[headerRowIndex].map((cell, index) => {
-    const label = normalizeImportedCell(cell);
+    const label = normalizeImportHeader(cell);
     return label || `COLUMN_${index + 1}`;
   });
 
@@ -140,6 +174,32 @@ function readWorksheetRows(XLSX, worksheet) {
       Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
     )
     .filter((row) => isImportableWorksheetRow(row));
+}
+
+async function parseImportResponse(response) {
+  const responseText = await response.text();
+
+  if (!responseText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return { error: responseText };
+  }
+}
+
+function getImportErrorMessage(error, fallbackMessage) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
+  return fallbackMessage;
 }
 
 function StatusPill({ children, tone = "neutral" }) {
@@ -828,11 +888,23 @@ export default function AdminInventoryManager({
         const data = await importFile.arrayBuffer();
         const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
         const sheetName = workbook.SheetNames[0];
+
+        if (!sheetName) {
+          throw new Error("The selected workbook does not contain any sheets.");
+        }
+
         const worksheet = workbook.Sheets[sheetName];
+
+        if (!worksheet) {
+          throw new Error(`Could not open sheet "${sheetName}".`);
+        }
+
         rows = readWorksheetRows(XLSX, worksheet);
 
         if (rows.length === 0) {
-          setError("No product rows were found in the selected sheet.");
+          setError(
+            "No product rows were found in the selected sheet. Check that ITEM NO, DESCRIPTION, TOTAL QTY, and UNIT PRICE contain values.",
+          );
           return;
         }
       }
@@ -968,10 +1040,13 @@ export default function AdminInventoryManager({
         }),
       });
 
-      const payload = await response.json();
+      const payload = await parseImportResponse(response);
 
       if (!response.ok) {
-        setError(payload.error || "Import failed.");
+        setError(
+          payload.error ||
+            `Import failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`,
+        );
         return;
       }
 
@@ -990,8 +1065,8 @@ export default function AdminInventoryManager({
       setImportFile(null);
       setImportImageFiles([]);
       setActiveSection("imports");
-    } catch {
-      setError("Import failed.");
+    } catch (error) {
+      setError(getImportErrorMessage(error, "Import failed."));
     } finally {
       setIsImporting(false);
     }
@@ -1613,7 +1688,7 @@ export default function AdminInventoryManager({
                   <button
                     type="button"
                     onClick={handleExcelUpload}
-                    disabled={!importFile || isImporting}
+                    disabled={(!importFile && importImageFiles.length === 0) || isImporting}
                     className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-orange-300"
                   >
                     {isImporting ? "Importing..." : "Start Import"}
