@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedAdmin } from "../../../../lib/auth";
-import { createProduct, listCategories, listProducts } from "../../../../lib/inventory";
+import {
+  clearAllProducts,
+  createProduct,
+  listCategories,
+  listProducts,
+} from "../../../../lib/inventory";
 
 async function ensureAdmin() {
   const admin = await getAuthenticatedAdmin();
@@ -51,6 +56,33 @@ export async function POST(request) {
   } catch (error) {
     return NextResponse.json(
       { error: error.message || "Unable to create product." },
+      { status: 400 },
+    );
+  }
+}
+
+export async function DELETE() {
+  const unauthorizedResponse = await ensureAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
+  try {
+    const result = await clearAllProducts();
+    const [products, categories] = await Promise.all([
+      listProducts({ admin: true }),
+      listCategories(),
+    ]);
+
+    return NextResponse.json({
+      ok: true,
+      deletedCount: result.deletedCount,
+      products,
+      categories,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message || "Unable to clear products." },
       { status: 400 },
     );
   }

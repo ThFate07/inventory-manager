@@ -256,7 +256,8 @@ function getLogTone(action) {
   if (
     action === "stock_deducted_from_order" ||
     action === "order_confirmed" ||
-    action === "import_image_unmatched_file"
+    action === "import_image_unmatched_file" ||
+    action === "products_cleared"
   ) {
     return "warning";
   }
@@ -277,6 +278,7 @@ function getLogLabel(action) {
     product_created_from_import: "Imported New",
     import_image_unmatched_product: "Missing Image",
     import_image_unmatched_file: "Unused Image",
+    products_cleared: "Cleared All",
     stock_deducted_from_order: "Stock Deducted",
     order_confirmed: "Order Confirmed",
     inventory_import_summary: "Import Summary",
@@ -294,6 +296,10 @@ function getLogType(action) {
     action === "import_image_unmatched_file"
   ) {
     return "import";
+  }
+
+  if (action === "products_cleared") {
+    return "product";
   }
 
   if (action === "stock_deducted_from_order" || action === "order_confirmed") {
@@ -717,6 +723,7 @@ export default function AdminInventoryManager({
   const [importImageFiles, setImportImageFiles] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState("");
+  const [isClearingProducts, setIsClearingProducts] = useState(false);
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -1137,6 +1144,60 @@ export default function AdminInventoryManager({
     }
   }
 
+  async function handleClearProducts() {
+    setError("");
+    setImportStatus("");
+
+    if (products.length === 0) {
+      setError("There are no products to clear.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `This will permanently delete all ${products.length} products from the admin inventory. This cannot be undone. Continue?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const confirmationText = window.prompt(
+      'Type CLEAR ALL to permanently delete every product.',
+      "",
+    );
+
+    if (confirmationText !== "CLEAR ALL") {
+      setError("Bulk delete cancelled. Type CLEAR ALL exactly to continue.");
+      return;
+    }
+
+    setIsClearingProducts(true);
+
+    try {
+      const response = await fetch("/api/admin/products", {
+        method: "DELETE",
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setError(payload.error || "Could not clear products.");
+        return;
+      }
+
+      setProducts(payload.products || []);
+      setCategories(payload.categories || []);
+      setImportStatus(
+        `Cleared ${payload.deletedCount || 0} product${payload.deletedCount === 1 ? "" : "s"} from inventory.`,
+      );
+      await refreshDashboard();
+    } catch {
+      setError("Could not clear products.");
+    } finally {
+      setIsClearingProducts(false);
+    }
+  }
+
   function handleImportImagesSelected(event) {
     const files = Array.from(event.target.files || []).filter((file) =>
       file.type.startsWith("image/"),
@@ -1542,6 +1603,17 @@ export default function AdminInventoryManager({
                     >
                       Import inventory sheet
                     </button>
+                    <button
+                      type="button"
+                      onClick={handleClearProducts}
+                      disabled={isClearingProducts || products.length === 0}
+                      className="w-full rounded-2xl border border-red-400/60 bg-red-500/15 px-4 py-2.5 text-left text-sm font-semibold text-red-100 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-white/40"
+                    >
+                      {isClearingProducts ? "Clearing products..." : "Clear all products"}
+                    </button>
+                    <p className="text-xs leading-5 text-red-100/80">
+                      Requires two confirmations and will be blocked if any product is tied to an existing order.
+                    </p>
                   </div>
                 </div>
 
