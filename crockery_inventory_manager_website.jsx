@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  getCartonPrice,
+  getMaxCartonQuantity,
+  getPiecesPerCartonValue,
+  getPricingUnitLabel,
+  getStoredCartonQuantity,
+} from "./lib/cart-pricing";
 
 const CART_STORAGE_KEY = "crockery-cart";
 
@@ -43,6 +50,11 @@ function CustomerProductCard({
 }) {
   const [imageUnavailable, setImageUnavailable] = useState(false);
   const showImage = Boolean(product.imageUrl) && !imageUnavailable;
+  const priceUnitLabel = getPricingUnitLabel(product.name);
+  const piecesPerCarton = getPiecesPerCartonValue(product.qtyPerCtn);
+  const cartonPrice = getCartonPrice(product.unitPriceInr, product.qtyPerCtn);
+  const maxCartons = getMaxCartonQuantity(product.stockQuantity, product.qtyPerCtn);
+  const isOutOfStock = product.stockQuantity > 0 && maxCartons === 0;
 
   return (
     <article className="overflow-hidden rounded-[1.6rem] bg-white shadow-xl transition duration-300 hover:-translate-y-1 sm:rounded-[2rem]">
@@ -90,29 +102,40 @@ function CustomerProductCard({
             : product.name}
         </h3>
         <p className="mt-2 text-sm font-bold text-green-600 sm:mt-4 sm:text-lg">
-          {formatCurrency(product.unitPriceInr)}
+          {formatCurrency(product.unitPriceInr)} / {priceUnitLabel}
         </p>
+        {piecesPerCarton ? (
+          <p className="mt-1 text-xs font-medium text-gray-500 sm:text-sm">
+            {formatCurrency(cartonPrice)} / CTN
+          </p>
+        ) : null}
 
         <div className="mt-3 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:items-center sm:gap-3">
-          <input
-            type="number"
-            min="1"
-            max={product.stockQuantity || 999}
-            value={cartQuantity}
-            onChange={(event) => onSetQuantity(product.id, event.target.value)}
-            onBlur={(event) => {
-              if (event.target.value.trim() === "") {
-                onSetQuantity(product.id, "1");
-              }
-            }}
-            className="h-9 w-full rounded-xl border border-orange-200 px-3 py-2 text-sm sm:h-11 sm:w-24 sm:text-base"
-          />
+          <div className="flex w-full items-center rounded-xl border border-orange-200 bg-white sm:w-auto">
+            <input
+              type="number"
+              min="1"
+              max={maxCartons > 0 ? maxCartons : 999}
+              value={cartQuantity}
+              onChange={(event) => onSetQuantity(product.id, event.target.value)}
+              onBlur={(event) => {
+                if (event.target.value.trim() === "") {
+                  onSetQuantity(product.id, "1");
+                }
+              }}
+              className="h-9 w-full min-w-0 rounded-l-xl px-3 py-2 text-sm outline-none sm:h-11 sm:w-24 sm:text-base"
+            />
+            <span className="flex h-9 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:h-11 sm:text-sm">
+              CTN
+            </span>
+          </div>
           <button
             type="button"
             onClick={() => onAddToCart(product)}
-            className="h-9 w-full flex-1 rounded-xl bg-orange-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 sm:h-11 sm:px-4"
+            disabled={isOutOfStock}
+            className="h-9 w-full flex-1 rounded-xl bg-orange-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-300 sm:h-11 sm:px-4"
           >
-            Add to Cart
+            {isOutOfStock ? "Out of Stock" : "Add to Cart"}
           </button>
         </div>
       </div>
@@ -133,7 +156,9 @@ export default function CrockeryInventoryManager({
   useEffect(() => {
     function syncCartCount() {
       const cart = readCart();
-      setCartCount(cart.reduce((sum, item) => sum + item.quantity, 0));
+      setCartCount(
+        cart.reduce((sum, item) => sum + getStoredCartonQuantity(item), 0),
+      );
     }
 
     syncCartCount();
@@ -175,10 +200,23 @@ export default function CrockeryInventoryManager({
   }
 
   function addToCart(product) {
-    const rawQuantity = Number(getQuantityInput(product.id));
-    const quantity = Number.isFinite(rawQuantity) && rawQuantity > 0 ? Math.floor(rawQuantity) : 1;
-    const cappedQuantity =
-      product.stockQuantity > 0 ? Math.min(quantity, product.stockQuantity) : quantity;
+    const rawCartonQuantity = Number(getQuantityInput(product.id));
+    const cartonQuantity =
+      Number.isFinite(rawCartonQuantity) && rawCartonQuantity > 0
+        ? Math.floor(rawCartonQuantity)
+        : 1;
+    const piecesPerCarton = getPiecesPerCartonValue(product.qtyPerCtn) || 1;
+    const maxCartons = getMaxCartonQuantity(product.stockQuantity, product.qtyPerCtn);
+    const cappedCartonQuantity =
+      product.stockQuantity > 0 && maxCartons > 0
+        ? Math.min(cartonQuantity, maxCartons)
+        : product.stockQuantity > 0
+          ? 0
+          : cartonQuantity;
+
+    if (cappedCartonQuantity <= 0) {
+      return;
+    }
 
     const currentCart = readCart();
     const existing = currentCart.find((item) => item.productId === product.id);
@@ -189,10 +227,15 @@ export default function CrockeryInventoryManager({
         item.productId === product.id
           ? {
               ...item,
+              qtyPerCtn: product.qtyPerCtn,
+              cartonQuantity:
+                product.stockQuantity > 0 && maxCartons > 0
+                  ? Math.min(getStoredCartonQuantity(item) + cappedCartonQuantity, maxCartons)
+                  : getStoredCartonQuantity(item) + cappedCartonQuantity,
               quantity:
-                product.stockQuantity > 0
-                  ? Math.min(item.quantity + cappedQuantity, product.stockQuantity)
-                  : item.quantity + cappedQuantity,
+                ((product.stockQuantity > 0 && maxCartons > 0
+                  ? Math.min(getStoredCartonQuantity(item) + cappedCartonQuantity, maxCartons)
+                  : getStoredCartonQuantity(item) + cappedCartonQuantity)) * piecesPerCarton,
             }
           : item,
       );
@@ -203,8 +246,10 @@ export default function CrockeryInventoryManager({
           productId: product.id,
           productCode: product.code,
           productName: product.name,
+          qtyPerCtn: product.qtyPerCtn,
           unitPriceInr: product.unitPriceInr,
-          quantity: cappedQuantity,
+          cartonQuantity: cappedCartonQuantity,
+          quantity: cappedCartonQuantity * piecesPerCarton,
         },
       ];
     }
