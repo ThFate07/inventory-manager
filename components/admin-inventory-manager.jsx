@@ -1954,7 +1954,7 @@ export default function AdminInventoryManager({
                       className="overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-lg"
                     >
                       {product.imageUrl ? (
-                        <div className="flex h-60 w-full items-center justify-center bg-white p-3">
+                        <div className="flex h-64 w-full items-center justify-center bg-white p-3">
                           <img
                             src={product.imageUrl}
                             alt={product.name}
@@ -1962,7 +1962,7 @@ export default function AdminInventoryManager({
                           />
                         </div>
                       ) : (
-                        <div className="flex h-60 w-full items-center justify-center bg-stone-100 text-sm font-semibold uppercase tracking-[0.2em] text-stone-400">
+                        <div className="flex h-64 w-full items-center justify-center bg-stone-100 text-sm font-semibold uppercase tracking-[0.2em] text-stone-400">
                           No Image
                         </div>
                       )}

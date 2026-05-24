@@ -58,7 +58,7 @@ function CustomerProductCard({
 
   return (
     <article className="overflow-hidden rounded-[1.6rem] bg-white shadow-xl transition duration-300 hover:-translate-y-1 sm:rounded-[2rem]">
-      <div className="flex h-36 items-center justify-center bg-gradient-to-br from-white via-orange-50 to-amber-100 p-3 sm:h-56 sm:p-4">
+      <div className="flex h-44 items-center justify-center bg-gradient-to-br from-white via-orange-50 to-amber-100 p-3 sm:h-64 sm:p-4">
         {showImage ? (
           <button
             type="button"
