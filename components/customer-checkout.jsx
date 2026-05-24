@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  getCartonPrice,
+  getMaxCartonQuantity,
+  getPiecesPerCartonValue,
+  getPricingUnitLabel,
+  getStoredCartonQuantity,
+} from "../lib/cart-pricing";
 
 const CART_STORAGE_KEY = "crockery-cart";
 
@@ -76,11 +83,25 @@ export default function CustomerCheckout({ initialProducts = [] }) {
 
   function updateCartQuantity(productId, value) {
     const product = productsById.get(productId);
-    const quantity = Math.max(1, Number(value) || 1);
-    const cappedQuantity =
-      product?.stockQuantity > 0 ? Math.min(quantity, product.stockQuantity) : quantity;
+    const qtyPerCtn = product?.qtyPerCtn || cart.find((item) => item.productId === productId)?.qtyPerCtn;
+    const piecesPerCarton = getPiecesPerCartonValue(qtyPerCtn) || 1;
+    const cartonQuantity = Math.max(1, Math.floor(Number(value) || 1));
+    const maxCartons = getMaxCartonQuantity(product?.stockQuantity, qtyPerCtn);
+    const cappedCartonQuantity =
+      product?.stockQuantity > 0 && maxCartons > 0
+        ? Math.min(cartonQuantity, maxCartons)
+        : product?.stockQuantity > 0
+          ? 0
+          : cartonQuantity;
     const nextCart = cart.map((item) =>
-      item.productId === productId ? { ...item, quantity: cappedQuantity } : item,
+      item.productId === productId
+        ? {
+            ...item,
+            qtyPerCtn,
+            cartonQuantity: cappedCartonQuantity,
+            quantity: cappedCartonQuantity * piecesPerCarton,
+          }
+        : item,
     );
     setCart(nextCart);
     writeCart(nextCart);
@@ -180,39 +201,62 @@ export default function CustomerCheckout({ initialProducts = [] }) {
               </div>
             ) : (
               cart.map((item) => (
-                <div
-                  key={item.productId}
-                  className="rounded-2xl border border-orange-100 p-4"
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-semibold text-gray-900">{item.productName}</p>
-                      <p className="text-sm text-gray-500">{item.productCode}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeFromCart(item.productId)}
-                      className="self-start text-sm font-semibold text-red-500"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                (() => {
+                  const product = productsById.get(item.productId);
+                  const qtyPerCtn = product?.qtyPerCtn || item.qtyPerCtn;
+                  const priceUnitLabel = getPricingUnitLabel(item.productName);
+                  const cartonQuantity = getStoredCartonQuantity(item);
+                  const cartonPrice = getCartonPrice(item.unitPriceInr, qtyPerCtn);
+                  const maxCartons = getMaxCartonQuantity(product?.stockQuantity, qtyPerCtn);
 
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(event) =>
-                        updateCartQuantity(item.productId, event.target.value)
-                      }
-                      className="h-11 w-full rounded-xl border border-orange-200 px-3 py-2 text-base sm:w-24"
-                    />
-                    <p className="text-base font-semibold text-green-600 sm:text-right">
-                      {formatCurrency(item.unitPriceInr * item.quantity)}
-                    </p>
-                  </div>
-                </div>
+                  return (
+                    <div
+                      key={item.productId}
+                      className="rounded-2xl border border-orange-100 p-4"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-gray-900">{item.productName}</p>
+                          <p className="text-sm text-gray-500">{item.productCode}</p>
+                          <p className="mt-1 text-sm font-medium text-gray-500">
+                            {formatCurrency(item.unitPriceInr)} / {priceUnitLabel}
+                          </p>
+                          <p className="text-sm font-medium text-gray-500">
+                            {formatCurrency(cartonPrice)} / CTN
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFromCart(item.productId)}
+                          className="self-start text-sm font-semibold text-red-500"
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex w-full items-center rounded-xl border border-orange-200 bg-white sm:w-auto">
+                          <input
+                            type="number"
+                            min="1"
+                            max={maxCartons > 0 ? maxCartons : undefined}
+                            value={cartonQuantity}
+                            onChange={(event) =>
+                              updateCartQuantity(item.productId, event.target.value)
+                            }
+                            className="h-11 w-full min-w-0 rounded-l-xl px-3 py-2 text-base outline-none sm:w-24"
+                          />
+                          <span className="flex h-11 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:text-sm">
+                            CTN
+                          </span>
+                        </div>
+                        <p className="text-base font-semibold text-green-600 sm:text-right">
+                          {formatCurrency(item.unitPriceInr * item.quantity)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()
               ))
             )}
           </div>
