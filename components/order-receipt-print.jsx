@@ -295,16 +295,16 @@ export default function OrderReceiptPrint({
                   tableLayout: "fixed",
                   border: "1px solid #000",
                 }}
-              >
+                >
                 <colgroup>
+                  <col style={{ width: "11%" }} />
+                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "9%" }} />
                   <col style={{ width: "12%" }} />
-                  <col style={{ width: "28%" }} />
                   <col style={{ width: "12%" }} />
-                  <col style={{ width: "8%" }} />
-                  <col style={{ width: "10%" }} />
-                  <col style={{ width: "10%" }} />
-                  <col style={{ width: "10%" }} />
-                  <col style={{ width: "10%" }} />
                 </colgroup>
                 <thead>
                   <tr style={{ background: "#f5f5f5" }}>
@@ -322,7 +322,7 @@ export default function OrderReceiptPrint({
                         key={label}
                         style={{
                           border: "1px solid #000",
-                          padding: "10px 8px",
+                          padding: "9px 6px",
                           fontSize: "11px",
                           fontWeight: 700,
                           textAlign: "center",
@@ -349,8 +349,8 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "12px",
                             fontWeight: 700,
                             textAlign: "center",
                             verticalAlign: "middle",
@@ -362,10 +362,10 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "11px",
                             verticalAlign: "middle",
-                            lineHeight: 1.5,
+                            lineHeight: 1.35,
                           }}
                         >
                           <div style={{ fontWeight: 700 }}>{item.productName}</div>
@@ -373,7 +373,7 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "8px",
+                            padding: "6px",
                             textAlign: "center",
                             verticalAlign: "middle",
                           }}
@@ -383,8 +383,8 @@ export default function OrderReceiptPrint({
                               src={item.imageUrl}
                               alt={item.productName}
                               style={{
-                                width: "52px",
-                                height: "52px",
+                                width: "98px",
+                                height: "98px",
                                 objectFit: "contain",
                                 display: "inline-block",
                               }}
@@ -393,8 +393,8 @@ export default function OrderReceiptPrint({
                             <div
                               className="receipt-photo-fallback"
                               style={{
-                                width: "52px",
-                                height: "52px",
+                                width: "68px",
+                                height: "68px",
                                 margin: "0 auto",
                                 border: "1px dashed #9ca3af",
                                 display: "flex",
@@ -411,8 +411,8 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "12px",
                             textAlign: "center",
                             verticalAlign: "middle",
                           }}
@@ -422,8 +422,8 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "12px",
                             textAlign: "center",
                             verticalAlign: "middle",
                           }}
@@ -433,8 +433,8 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "12px",
                             textAlign: "center",
                             verticalAlign: "middle",
                           }}
@@ -444,8 +444,8 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "12px",
                             textAlign: "right",
                             verticalAlign: "middle",
                             whiteSpace: "nowrap",
@@ -456,8 +456,8 @@ export default function OrderReceiptPrint({
                         <td
                           style={{
                             border: "1px solid #000",
-                            padding: "10px 8px",
-                            fontSize: "13px",
+                            padding: "8px 6px",
+                            fontSize: "12px",
                             textAlign: "right",
                             verticalAlign: "middle",
                             fontWeight: 700,
@@ -476,7 +476,7 @@ export default function OrderReceiptPrint({
                       colSpan={3}
                       style={{
                         border: "1px solid #000",
-                        padding: "12px 8px",
+                        padding: "10px 6px",
                         fontSize: "13px",
                         fontWeight: 700,
                         textAlign: "right",
@@ -487,7 +487,7 @@ export default function OrderReceiptPrint({
                     <td
                       style={{
                         border: "1px solid #000",
-                        padding: "12px 8px",
+                        padding: "10px 6px",
                         fontSize: "13px",
                         fontWeight: 700,
                         textAlign: "center",
@@ -498,7 +498,7 @@ export default function OrderReceiptPrint({
                     <td
                       style={{
                         border: "1px solid #000",
-                        padding: "12px 8px",
+                        padding: "10px 6px",
                         fontSize: "13px",
                         fontWeight: 700,
                         textAlign: "center",
@@ -509,7 +509,7 @@ export default function OrderReceiptPrint({
                     <td
                       style={{
                         border: "1px solid #000",
-                        padding: "12px 8px",
+                        padding: "10px 6px",
                         fontSize: "13px",
                         fontWeight: 700,
                         textAlign: "center",
@@ -520,7 +520,7 @@ export default function OrderReceiptPrint({
                     <td
                       style={{
                         border: "1px solid #000",
-                        padding: "12px 8px",
+                        padding: "10px 6px",
                         fontSize: "13px",
                         fontWeight: 700,
                         textAlign: "center",
@@ -531,7 +531,7 @@ export default function OrderReceiptPrint({
                     <td
                       style={{
                         border: "1px solid #000",
-                        padding: "12px 8px",
+                        padding: "10px 6px",
                         fontSize: "13px",
                         fontWeight: 700,
                         textAlign: "right",
