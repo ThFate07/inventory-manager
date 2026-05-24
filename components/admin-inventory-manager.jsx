@@ -216,6 +216,36 @@ async function uploadImageFile(file, { productCode = "" } = {}) {
   return payload.url;
 }
 
+function getOrderReceiptUrl(orderId, { autoPrint = false } = {}) {
+  const normalizedOrderId = String(orderId || "").trim();
+
+  if (!normalizedOrderId) {
+    return "";
+  }
+
+  const query = autoPrint ? "?autoprint=1" : "";
+  return `/admin/orders/${encodeURIComponent(normalizedOrderId)}/receipt${query}`;
+}
+
+function openOrderReceiptWindow(orderId, { autoPrint = false, targetWindow = null } = {}) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const receiptUrl = getOrderReceiptUrl(orderId, { autoPrint });
+
+  if (!receiptUrl) {
+    return null;
+  }
+
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = receiptUrl;
+    return targetWindow;
+  }
+
+  return window.open(receiptUrl, "_blank", "noopener,noreferrer");
+}
+
 function getImportedItemCode(item) {
   return normalizeItemCode(
     item["ITEM NO"] ||
@@ -538,13 +568,24 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
 
               {expanded ? (
                 <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => toggleOrder(order.orderId)}
-                    className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:bg-stone-100"
-                  >
-                    {openOrderIds.has(order.orderId) ? "Hide Details" : "View Details"}
-                  </button>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleOrder(order.orderId)}
+                      className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:bg-stone-100"
+                    >
+                      {openOrderIds.has(order.orderId) ? "Hide Details" : "View Details"}
+                    </button>
+                    {order.status === "confirmed" ? (
+                      <button
+                        type="button"
+                        onClick={() => openOrderReceiptWindow(order.orderId)}
+                        className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:bg-stone-100"
+                      >
+                        View Receipt
+                      </button>
+                    ) : null}
+                  </div>
 
                   {openOrderIds.has(order.orderId) ? (
                     <div className="mt-4 space-y-4 rounded-[1.5rem] border border-stone-200 bg-white p-4">
@@ -1564,6 +1605,25 @@ export default function AdminInventoryManager({
       return;
     }
 
+    const receiptWindow =
+      typeof window === "undefined" ? null : window.open("", "_blank");
+
+    if (receiptWindow) {
+      receiptWindow.document.write(`
+        <title>Preparing Receipt</title>
+        <body style="font-family: Arial, sans-serif; padding: 24px; color: #292524;">
+          <p style="margin: 0; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #f97316; font-weight: 700;">
+            Preparing Receipt
+          </p>
+          <h1 style="margin: 12px 0 0; font-size: 24px;">Building payment receipt...</h1>
+          <p style="margin: 12px 0 0; font-size: 14px; color: #57534e;">
+            This tab will switch to the printable receipt as soon as the order is confirmed.
+          </p>
+        </body>
+      `);
+      receiptWindow.document.close();
+    }
+
     setIsConfirmingOrder(true);
     setOrderLookupError("");
 
@@ -1583,13 +1643,25 @@ export default function AdminInventoryManager({
       const payload = await response.json();
 
       if (!response.ok) {
+        if (receiptWindow && !receiptWindow.closed) {
+          receiptWindow.close();
+        }
+
         setOrderLookupError(payload.error || "Unable to confirm order.");
         return;
       }
 
       setLoadedOrder(payload.order);
       await refreshDashboard();
+      openOrderReceiptWindow(payload.order.orderId, {
+        autoPrint: true,
+        targetWindow: receiptWindow,
+      });
     } catch {
+      if (receiptWindow && !receiptWindow.closed) {
+        receiptWindow.close();
+      }
+
       setOrderLookupError("Unable to confirm order.");
     } finally {
       setIsConfirmingOrder(false);
@@ -2162,10 +2234,22 @@ export default function AdminInventoryManager({
                     >
                       {isDeletingOrder ? "Deleting..." : "Delete Order"}
                     </button>
+                    {loadedOrder.status === "confirmed" ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openOrderReceiptWindow(loadedOrder.orderId, { autoPrint: true })
+                        }
+                        disabled={isConfirmingOrder || isReversingOrder || isDeletingOrder}
+                        className="rounded-2xl border border-stone-300 bg-white px-6 py-3 font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                      >
+                        Print / Save Receipt PDF
+                      </button>
+                    ) : null}
                   </div>
 
                   <p className="mt-3 text-sm text-gray-500">
-                    Confirmed orders are locked for price edits until you reverse them. Deleting a confirmed order restores its stock first.
+                    Confirmed orders are locked for price edits until you reverse them. Deleting a confirmed order restores its stock first. A printable receipt opens right after confirmation, and you can re-open it here anytime.
                   </p>
                 </div>
               ) : null}
