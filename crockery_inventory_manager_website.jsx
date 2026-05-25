@@ -19,6 +19,23 @@ function formatCurrency(value) {
   }).format(value);
 }
 
+function Toast({ message, type = "success", onClose }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  const bgColor = type === "success" ? "bg-green-500" : "bg-red-500";
+  const icon = type === "success" ? "✓" : "✕";
+
+  return (
+    <div className={`${bgColor} fixed bottom-20 right-4 z-40 rounded-lg px-4 py-3 text-white shadow-lg flex items-center gap-3 sm:bottom-6 sm:right-6 animation-pulse`}>
+      <span className="text-xl font-bold">{icon}</span>
+      <span className="text-sm font-medium">{message}</span>
+    </div>
+  );
+}
+
 function readCart() {
   if (typeof window === "undefined") {
     return [];
@@ -44,17 +61,27 @@ function writeCart(cart) {
 function CustomerProductCard({
   product,
   cartQuantity,
+  cartError,
   onAddToCart,
   onSetQuantity,
   onOpenImage,
 }) {
   const [imageUnavailable, setImageUnavailable] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
   const showImage = Boolean(product.imageUrl) && !imageUnavailable;
   const priceUnitLabel = getPricingUnitLabel(product.name);
   const piecesPerCarton = getPiecesPerCartonValue(product.qtyPerCtn);
   const cartonPrice = getCartonPrice(product.unitPriceInr, product.qtyPerCtn);
+  const hasTrackedStock = Number(product.stockQuantity) > 0;
   const maxCartons = getMaxCartonQuantity(product.stockQuantity, product.qtyPerCtn);
-  const isOutOfStock = product.stockQuantity > 0 && maxCartons === 0;
+  const isOutOfStock = hasTrackedStock && maxCartons === 0;
+
+  const handleAddToCart = async () => {
+    setIsAdding(true);
+    onAddToCart(product);
+    // Simulate action completion for button feedback
+    setTimeout(() => setIsAdding(false), 300);
+  };
 
   return (
     <article className="overflow-hidden rounded-[1.6rem] bg-white shadow-xl transition duration-300 hover:-translate-y-1 sm:rounded-[2rem]">
@@ -97,10 +124,13 @@ function CustomerProductCard({
         </div>
 
         <h3 className="mt-2 text-sm font-bold leading-snug text-gray-900 sm:mt-3 sm:text-xl">
-          {product.qtyPerCtn && product.ctn
-            ? `${product.name}, ${product.qtyPerCtn} In CTN`
-            : product.name}
+          {product.name}
         </h3>
+        {product.qtyPerCtn && product.ctn ? (
+          <p className="mt-2 text-xs font-semibold text-gray-600 sm:text-sm">
+            {product.qtyPerCtn} PIECES IN CTN
+          </p>
+        ) : null}
         <p className="mt-2 text-sm font-bold text-green-600 sm:mt-4 sm:text-lg">
           {formatCurrency(product.unitPriceInr)} / {priceUnitLabel}
         </p>
@@ -115,7 +145,6 @@ function CustomerProductCard({
             <input
               type="number"
               min="1"
-              max={maxCartons > 0 ? maxCartons : 999}
               value={cartQuantity}
               onChange={(event) => onSetQuantity(product.id, event.target.value)}
               onBlur={(event) => {
@@ -123,7 +152,8 @@ function CustomerProductCard({
                   onSetQuantity(product.id, "1");
                 }
               }}
-              className="h-9 w-full min-w-0 rounded-l-xl px-3 py-2 text-sm outline-none sm:h-11 sm:w-24 sm:text-base"
+              disabled={isAdding}
+              className="h-9 w-full min-w-0 rounded-l-xl px-3 py-2 text-sm outline-none disabled:opacity-50 sm:h-11 sm:w-24 sm:text-base"
             />
             <span className="flex h-9 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:h-11 sm:text-sm">
               CTN
@@ -131,13 +161,25 @@ function CustomerProductCard({
           </div>
           <button
             type="button"
-            onClick={() => onAddToCart(product)}
-            disabled={isOutOfStock}
-            className="h-9 w-full flex-1 rounded-xl bg-orange-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-300 sm:h-11 sm:px-4"
+            onClick={handleAddToCart}
+            disabled={isOutOfStock || isAdding}
+            className="h-9 w-full flex-1 rounded-xl bg-orange-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-300 sm:h-11 sm:px-4 active:scale-95"
           >
-            {isOutOfStock ? "Out of Stock" : "Add to Cart"}
+            {isAdding ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+                Adding...
+              </span>
+            ) : isOutOfStock ? (
+              "Out of Stock"
+            ) : (
+              "Add to Cart"
+            )}
           </button>
         </div>
+        {cartError ? (
+          <p className="mt-2 text-xs font-medium text-red-600">{cartError}</p>
+        ) : null}
       </div>
     </article>
   );
@@ -150,8 +192,10 @@ export default function CrockeryInventoryManager({
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All Categories");
   const [quantityInputs, setQuantityInputs] = useState({});
+  const [quantityErrors, setQuantityErrors] = useState({});
   const [cartCount, setCartCount] = useState(0);
   const [enlargedImage, setEnlargedImage] = useState(null);
+  const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
     function syncCartCount() {
@@ -199,6 +243,30 @@ export default function CrockeryInventoryManager({
     }));
   }
 
+  function setQuantityError(productId, message) {
+    setQuantityErrors((current) => {
+      if (!message) {
+        const nextErrors = { ...current };
+        delete nextErrors[productId];
+        return nextErrors;
+      }
+
+      return {
+        ...current,
+        [productId]: message,
+      };
+    });
+  }
+
+  function showToast(message, type = "success") {
+    const id = Date.now();
+    setToasts((current) => [...current, { id, message, type }]);
+  }
+
+  function removeToast(id) {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }
+
   function addToCart(product) {
     const rawCartonQuantity = Number(getQuantityInput(product.id));
     const cartonQuantity =
@@ -207,19 +275,27 @@ export default function CrockeryInventoryManager({
         : 1;
     const piecesPerCarton = getPiecesPerCartonValue(product.qtyPerCtn) || 1;
     const maxCartons = getMaxCartonQuantity(product.stockQuantity, product.qtyPerCtn);
-    const cappedCartonQuantity =
-      product.stockQuantity > 0 && maxCartons > 0
-        ? Math.min(cartonQuantity, maxCartons)
-        : product.stockQuantity > 0
-          ? 0
-          : cartonQuantity;
-
-    if (cappedCartonQuantity <= 0) {
-      return;
-    }
 
     const currentCart = readCart();
     const existing = currentCart.find((item) => item.productId === product.id);
+    const existingCartons = existing ? getStoredCartonQuantity(existing) : 0;
+    const requestedCartons = existingCartons + cartonQuantity;
+
+    if (Number(product.stockQuantity) > 0 && maxCartons === 0) {
+      setQuantityError(product.id, "This many cartons are not available in stock.");
+      showToast("This product is out of stock", "error");
+      return;
+    }
+
+    if (maxCartons > 0 && requestedCartons > maxCartons) {
+      setQuantityError(
+        product.id,
+        `Only ${maxCartons} carton${maxCartons === 1 ? "" : "s"} are available in stock.`,
+      );
+      showToast(`Only ${maxCartons} carton${maxCartons === 1 ? "" : "s"} available`, "error");
+      return;
+    }
+
     let nextCart;
 
     if (existing) {
@@ -228,14 +304,9 @@ export default function CrockeryInventoryManager({
           ? {
               ...item,
               qtyPerCtn: product.qtyPerCtn,
-              cartonQuantity:
-                product.stockQuantity > 0 && maxCartons > 0
-                  ? Math.min(getStoredCartonQuantity(item) + cappedCartonQuantity, maxCartons)
-                  : getStoredCartonQuantity(item) + cappedCartonQuantity,
+              cartonQuantity: getStoredCartonQuantity(item) + cartonQuantity,
               quantity:
-                ((product.stockQuantity > 0 && maxCartons > 0
-                  ? Math.min(getStoredCartonQuantity(item) + cappedCartonQuantity, maxCartons)
-                  : getStoredCartonQuantity(item) + cappedCartonQuantity)) * piecesPerCarton,
+                (getStoredCartonQuantity(item) + cartonQuantity) * piecesPerCarton,
             }
           : item,
       );
@@ -248,17 +319,21 @@ export default function CrockeryInventoryManager({
           productName: product.name,
           qtyPerCtn: product.qtyPerCtn,
           unitPriceInr: product.unitPriceInr,
-          cartonQuantity: cappedCartonQuantity,
-          quantity: cappedCartonQuantity * piecesPerCarton,
+          cartonQuantity,
+          quantity: cartonQuantity * piecesPerCarton,
         },
       ];
     }
 
+    setQuantityError(product.id, "");
     writeCart(nextCart);
     setQuantityInputs((current) => ({
       ...current,
       [product.id]: "1",
     }));
+    
+    // Show success toast
+    showToast(`${product.name} added to cart (${cartonQuantity} CTN)`, "success");
   }
 
   function closeEnlargedImage() {
@@ -343,6 +418,7 @@ export default function CrockeryInventoryManager({
                 key={product.id ?? product.code}
                 product={product}
                 cartQuantity={getQuantityInput(product.id)}
+                cartError={quantityErrors[product.id]}
                 onAddToCart={addToCart}
                 onSetQuantity={setQuantityInput}
                 onOpenImage={setEnlargedImage}
@@ -417,6 +493,15 @@ export default function CrockeryInventoryManager({
           </div>
         </div>
       ) : null}
+
+      {toasts.map((toast) => (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => removeToast(toast.id)}
+        />
+      ))}
     </div>
   );
 }

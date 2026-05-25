@@ -596,6 +596,13 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
+                      onClick={() => router.push(getAdminOrderUrl(order.orderId))}
+                      className="rounded-xl border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
+                    >
+                      Open order
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => toggleOrder(order.orderId)}
                       className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:bg-stone-100"
                     >
