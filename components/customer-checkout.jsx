@@ -53,6 +53,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
   const [cart, setCart] = useState([]);
   const [checkoutForm, setCheckoutForm] = useState(emptyCheckoutForm());
   const [checkoutError, setCheckoutError] = useState("");
+  const [cartErrors, setCartErrors] = useState({});
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [placedOrder, setPlacedOrder] = useState(null);
 
@@ -83,32 +84,55 @@ export default function CustomerCheckout({ initialProducts = [] }) {
 
   function updateCartQuantity(productId, value) {
     const product = productsById.get(productId);
-    const qtyPerCtn = product?.qtyPerCtn || cart.find((item) => item.productId === productId)?.qtyPerCtn;
+    const existingItem = cart.find((item) => item.productId === productId);
+    const qtyPerCtn = product?.qtyPerCtn || existingItem?.qtyPerCtn;
     const piecesPerCarton = getPiecesPerCartonValue(qtyPerCtn) || 1;
     const cartonQuantity = Math.max(1, Math.floor(Number(value) || 1));
     const maxCartons = getMaxCartonQuantity(product?.stockQuantity, qtyPerCtn);
-    const cappedCartonQuantity =
-      product?.stockQuantity > 0 && maxCartons > 0
-        ? Math.min(cartonQuantity, maxCartons)
-        : product?.stockQuantity > 0
-          ? 0
-          : cartonQuantity;
+    const hasTrackedStock = Number(product?.stockQuantity) > 0;
+
+    if (hasTrackedStock && maxCartons === 0) {
+      setCartErrors((current) => ({
+        ...current,
+        [productId]: "This many cartons are not available in stock.",
+      }));
+      return;
+    }
+
+    if (hasTrackedStock && cartonQuantity > maxCartons) {
+      setCartErrors((current) => ({
+        ...current,
+        [productId]: `Only ${maxCartons} carton${maxCartons === 1 ? "" : "s"} are available in stock.`,
+      }));
+      return;
+    }
+
     const nextCart = cart.map((item) =>
       item.productId === productId
         ? {
             ...item,
             qtyPerCtn,
-            cartonQuantity: cappedCartonQuantity,
-            quantity: cappedCartonQuantity * piecesPerCarton,
+            cartonQuantity,
+            quantity: cartonQuantity * piecesPerCarton,
           }
         : item,
     );
+    setCartErrors((current) => {
+      const nextErrors = { ...current };
+      delete nextErrors[productId];
+      return nextErrors;
+    });
     setCart(nextCart);
     writeCart(nextCart);
   }
 
   function removeFromCart(productId) {
     const nextCart = cart.filter((item) => item.productId !== productId);
+    setCartErrors((current) => {
+      const nextErrors = { ...current };
+      delete nextErrors[productId];
+      return nextErrors;
+    });
     setCart(nextCart);
     writeCart(nextCart);
   }
@@ -235,20 +259,26 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                       </div>
 
                       <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex w-full items-center rounded-xl border border-orange-200 bg-white sm:w-auto">
-                          <input
-                            type="number"
-                            min="1"
-                            max={maxCartons > 0 ? maxCartons : undefined}
-                            value={cartonQuantity}
-                            onChange={(event) =>
-                              updateCartQuantity(item.productId, event.target.value)
-                            }
-                            className="h-11 w-full min-w-0 rounded-l-xl px-3 py-2 text-base outline-none sm:w-24"
-                          />
-                          <span className="flex h-11 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:text-sm">
-                            CTN
-                          </span>
+                        <div className="w-full sm:w-auto">
+                          <div className="flex w-full items-center rounded-xl border border-orange-200 bg-white sm:w-auto">
+                            <input
+                              type="number"
+                              min="1"
+                              value={cartonQuantity}
+                              onChange={(event) =>
+                                updateCartQuantity(item.productId, event.target.value)
+                              }
+                              className="h-11 w-full min-w-0 rounded-l-xl px-3 py-2 text-base outline-none sm:w-24"
+                            />
+                            <span className="flex h-11 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:text-sm">
+                              CTN
+                            </span>
+                          </div>
+                          {cartErrors[item.productId] ? (
+                            <p className="mt-2 text-xs font-medium text-red-600">
+                              {cartErrors[item.productId]}
+                            </p>
+                          ) : null}
                         </div>
                         <p className="text-base font-semibold text-green-600 sm:text-right">
                           {formatCurrency(item.unitPriceInr * item.quantity)}

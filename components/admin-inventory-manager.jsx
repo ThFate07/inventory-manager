@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import CatalogMaker from "../catalog_maker";
 
 const CATALOG_SOURCE_STORAGE_KEY = "admin-catalog-source";
@@ -244,6 +244,16 @@ function openOrderReceiptWindow(orderId, { autoPrint = false, targetWindow = nul
   }
 
   return window.open(receiptUrl, "_blank", "noopener,noreferrer");
+}
+
+function getAdminOrderUrl(orderId) {
+  const normalizedOrderId = String(orderId || "").trim();
+
+  if (!normalizedOrderId) {
+    return "/admin/orders";
+  }
+
+  return `/admin/orders?orderId=${encodeURIComponent(normalizedOrderId)}`;
 }
 
 function getImportedItemCode(item) {
@@ -501,6 +511,7 @@ function getLogTypeLabel(type) {
 }
 
 function RecentOrdersPanel({ orders = [], expanded = false }) {
+  const router = useRouter();
   const [openOrderIds, setOpenOrderIds] = useState(() => new Set());
 
   function toggleOrder(orderId) {
@@ -540,7 +551,11 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
           orders.map((order) => (
             <article
               key={order.orderId}
-              className="rounded-[1.5rem] border border-stone-200 bg-stone-50 p-4"
+              className={`rounded-[1.5rem] border border-stone-200 p-4 ${
+                expanded
+                  ? "bg-stone-50"
+                  : "bg-stone-50 transition hover:-translate-y-0.5 hover:border-orange-300 hover:bg-white"
+              }`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -566,9 +581,26 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
                 </span>
               </div>
 
+              {!expanded ? (
+                <button
+                  type="button"
+                  onClick={() => router.push(getAdminOrderUrl(order.orderId))}
+                  className="mt-4 inline-flex rounded-xl border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
+                >
+                  Open order
+                </button>
+              ) : null}
+
               {expanded ? (
                 <div className="mt-4">
                   <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => router.push(getAdminOrderUrl(order.orderId))}
+                      className="rounded-xl border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
+                    >
+                      Open order
+                    </button>
                     <button
                       type="button"
                       onClick={() => toggleOrder(order.orderId)}
@@ -887,6 +919,7 @@ export default function AdminInventoryManager({
   initialSection = "overview",
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [products, setProducts] = useState(initialProducts);
   const [categories, setCategories] = useState(initialCategories);
   const [recentOrders, setRecentOrders] = useState(initialRecentOrders);
@@ -921,6 +954,7 @@ export default function AdminInventoryManager({
   const [catalogSourceTitle, setCatalogSourceTitle] = useState(
     () => readCatalogSourceFromStorage()?.title || "Crockery Product Catalog",
   );
+  const requestedOrderId = searchParams.get("orderId")?.trim() || "";
 
   useEffect(() => {
     if (catalogSourceProducts.length === 0) {
@@ -1532,8 +1566,10 @@ export default function AdminInventoryManager({
     router.refresh();
   }
 
-  async function fetchOrderDetails() {
-    if (!orderLookupId.trim()) {
+  async function fetchOrderDetails(targetOrderId = orderLookupId) {
+    const normalizedOrderId = targetOrderId.trim();
+
+    if (!normalizedOrderId) {
       setOrderLookupError("Enter an order ID.");
       return;
     }
@@ -1542,7 +1578,7 @@ export default function AdminInventoryManager({
     setOrderLookupError("");
 
     try {
-      const response = await fetch(`/api/admin/orders/${orderLookupId.trim()}`);
+      const response = await fetch(`/api/admin/orders/${normalizedOrderId}`);
       const payload = await response.json();
 
       if (!response.ok) {
@@ -1552,7 +1588,7 @@ export default function AdminInventoryManager({
       }
 
       setLoadedOrder(payload.order);
-      setOrderLookupId(payload.order.orderId || orderLookupId.trim());
+      setOrderLookupId(payload.order.orderId || normalizedOrderId);
     } catch {
       setOrderLookupError("Unable to fetch order.");
       setLoadedOrder(null);
@@ -1560,6 +1596,19 @@ export default function AdminInventoryManager({
       setIsLoadingOrder(false);
     }
   }
+
+  useEffect(() => {
+    if (activeSection !== "orders" || !requestedOrderId) {
+      return;
+    }
+
+    if (loadedOrder?.orderId === requestedOrderId) {
+      return;
+    }
+
+    setOrderLookupId(requestedOrderId);
+    fetchOrderDetails(requestedOrderId);
+  }, [activeSection, loadedOrder?.orderId, requestedOrderId]);
 
   function updateLoadedOrderUnitPrice(itemId, nextValue) {
     setLoadedOrder((current) => {
