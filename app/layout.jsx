@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Crockery Inventory Manager",
-  description: "Inventory dashboard for a crockery business.",
+  title: "Deen Enterprise",
+  description: "Browse products and build your cart here",
 };
 
 export default function RootLayout({ children }) {
