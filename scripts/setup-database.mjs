@@ -79,6 +79,13 @@ async function main() {
   await client.query("begin");
 
   try {
+    await client.query(
+      `
+        select pg_advisory_xact_lock(hashtext($1))
+      `,
+      ["inventory_bootstrap_v1"],
+    );
+
     await client.query(`
       create table if not exists categories (
         id bigserial primary key,
@@ -131,6 +138,21 @@ async function main() {
     `);
 
     await client.query(`
+      alter table products
+      add column if not exists ctn text not null default '';
+    `);
+
+    await client.query(`
+      alter table products
+      add column if not exists qty_per_ctn text not null default '';
+    `);
+
+    await client.query(`
+      alter table products
+      add column if not exists catalog_unit text not null default '1 pcs';
+    `);
+
+    await client.query(`
       create table if not exists admin_users (
         id bigserial primary key,
         username text not null unique,
@@ -138,6 +160,33 @@ async function main() {
         display_name text not null,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now()
+      );
+    `);
+
+    await client.query(`
+      create table if not exists orders (
+        id bigserial primary key,
+        order_id text not null unique,
+        customer_name text not null,
+        customer_phone text,
+        notes text,
+        status text not null default 'pending_confirmation',
+        payment_status text not null default 'pending',
+        total_amount_inr numeric(12, 2) not null default 0,
+        confirmed_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+    `);
+
+    await client.query(`
+      create table if not exists order_items (
+        id bigserial primary key,
+        order_id bigint not null references orders(id) on delete cascade,
+        product_id bigint not null references products(id) on delete restrict,
+        quantity integer not null check (quantity > 0),
+        unit_price_inr numeric(12, 2) not null default 0,
+        created_at timestamptz not null default now()
       );
     `);
 
@@ -152,6 +201,11 @@ async function main() {
         details text not null,
         created_at timestamptz not null default now()
       );
+    `);
+
+    await client.query(`
+      alter table inventory_activity_logs
+      add column if not exists category text;
     `);
 
     for (const categoryName of [...new Set(sampleProducts.map((product) => product.category))]) {
