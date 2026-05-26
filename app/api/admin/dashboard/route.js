@@ -1,21 +1,20 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../lib/auth";
+import { jsonError, jsonOk, requireAdmin } from "../../../../lib/api-response";
 import { getAdminDashboardSnapshot } from "../../../../lib/inventory";
 
 export async function GET() {
-  const admin = await getAuthenticatedAdmin();
+  return handleGetAdminDashboard();
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleGetAdminDashboard() {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
     const snapshot = await getAdminDashboardSnapshot();
-    return NextResponse.json(snapshot);
+    return jsonOk(snapshot);
   } catch {
-    return NextResponse.json(
-      { error: "Unable to load admin dashboard." },
-      { status: 500 },
-    );
+    return jsonError("Unable to load admin dashboard.", 500);
   }
 }

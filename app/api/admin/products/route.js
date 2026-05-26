@@ -1,5 +1,9 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  readJson,
+  requireAdmin,
+} from "../../../../lib/api-response";
 import {
   clearAllProducts,
   createProduct,
@@ -7,83 +11,72 @@ import {
   listProducts,
 } from "../../../../lib/inventory";
 
-async function ensureAdmin() {
-  const admin = await getAuthenticatedAdmin();
-
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  return null;
-}
-
 export async function GET() {
-  const unauthorizedResponse = await ensureAdmin();
-  if (unauthorizedResponse) {
-    return unauthorizedResponse;
-  }
-
-  try {
-    const [products, categories] = await Promise.all([
-      listProducts({ admin: true }),
-      listCategories(),
-    ]);
-
-    return NextResponse.json({ products, categories });
-  } catch {
-    return NextResponse.json(
-      { error: "Unable to load admin inventory." },
-      { status: 500 },
-    );
-  }
+  return handleGetAdminProducts();
 }
 
 export async function POST(request) {
-  const unauthorizedResponse = await ensureAdmin();
+  return handleCreateProduct(request);
+}
+
+export async function DELETE() {
+  return handleDeleteAllProducts();
+}
+
+async function handleGetAdminProducts() {
+  const unauthorizedResponse = await requireAdmin();
   if (unauthorizedResponse) {
     return unauthorizedResponse;
   }
 
   try {
-    const body = await request.json();
-    await createProduct(body);
-    const [products, categories] = await Promise.all([
-      listProducts({ admin: true }),
-      listCategories(),
-    ]);
-
-    return NextResponse.json({ ok: true, products, categories });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to create product." },
-      { status: 400 },
-    );
+    const payload = await loadAdminInventory();
+    return jsonOk(payload);
+  } catch {
+    return jsonError("Unable to load admin inventory.", 500);
   }
 }
 
-export async function DELETE() {
-  const unauthorizedResponse = await ensureAdmin();
+async function handleCreateProduct(request) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
+  try {
+    const body = await readJson(request);
+    await createProduct(body);
+    const payload = await loadAdminInventory();
+    return jsonOk({ ok: true, ...payload });
+  } catch (error) {
+    return jsonError(error.message || "Unable to create product.", 400);
+  }
+}
+
+async function handleDeleteAllProducts() {
+  const unauthorizedResponse = await requireAdmin();
   if (unauthorizedResponse) {
     return unauthorizedResponse;
   }
 
   try {
     const result = await clearAllProducts();
-    const [products, categories] = await Promise.all([
-      listProducts({ admin: true }),
-      listCategories(),
-    ]);
-
-    return NextResponse.json({
+    const payload = await loadAdminInventory();
+    return jsonOk({
       ok: true,
       deletedCount: result.deletedCount,
-      products,
-      categories,
+      ...payload,
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to clear products." },
-      { status: 400 },
-    );
+    return jsonError(error.message || "Unable to clear products.", 400);
   }
+}
+
+async function loadAdminInventory() {
+  const [products, categories] = await Promise.all([
+    listProducts({ admin: true }),
+    listCategories(),
+  ]);
+
+  return { products, categories };
 }

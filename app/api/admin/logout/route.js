@@ -1,8 +1,12 @@
-import { NextResponse } from "next/server";
+import { jsonOk } from "../../../../lib/api-response";
 import { clearAdminSession } from "../../../../lib/auth";
 
 export async function POST() {
-  const response = NextResponse.json({ ok: true });
+  return handleAdminLogout();
+}
+
+async function handleAdminLogout() {
+  const response = jsonOk({ ok: true });
   clearAdminSession(response);
   return response;
 }

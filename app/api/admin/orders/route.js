@@ -1,27 +1,30 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  requireAdmin,
+} from "../../../../lib/api-response";
 import { clearAllOrders, getAdminDashboardSnapshot } from "../../../../lib/inventory";
 
 export async function DELETE() {
-  const admin = await getAuthenticatedAdmin();
+  return handleClearOrders();
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleClearOrders() {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
     const result = await clearAllOrders();
     const snapshot = await getAdminDashboardSnapshot();
 
-    return NextResponse.json({
+    return jsonOk({
       ok: true,
       deletedCount: result.deletedCount,
       ...snapshot,
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to clear orders." },
-      { status: 400 },
-    );
+    return jsonError(error.message || "Unable to clear orders.", 400);
   }
 }

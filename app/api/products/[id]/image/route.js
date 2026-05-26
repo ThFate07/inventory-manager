@@ -21,9 +21,13 @@ function decodeDataUrl(dataUrl) {
 }
 
 export async function GET(_request, { params }) {
+  return handleGetProductImage(params);
+}
+
+async function handleGetProductImage(params) {
   try {
-    const { id } = await params;
-    const asset = await getProductImageAsset(Number(id));
+    const productId = await readProductId(params);
+    const asset = await getProductImageAsset(productId);
 
     if (!asset?.imageUrl) {
       return new Response("Not found.", { status: 404 });
@@ -45,4 +49,9 @@ export async function GET(_request, { params }) {
   } catch {
     return new Response("Unable to load image.", { status: 400 });
   }
+}
+
+async function readProductId(params) {
+  const { id } = await params;
+  return Number(id);
 }
