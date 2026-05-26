@@ -1,23 +1,32 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  readJson,
+  requireAdmin,
+} from "../../../../../../lib/api-response";
 import { confirmOrder } from "../../../../../../lib/inventory";
 
 export async function POST(request, { params }) {
-  const admin = await getAuthenticatedAdmin();
+  return handleConfirmOrder(request, params);
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleConfirmOrder(request, params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
-    const body = await request.json().catch(() => ({}));
-    const { orderId } = await params;
+    const body = await readJson(request, {});
+    const orderId = await readOrderId(params);
     const order = await confirmOrder(orderId, body);
-    return NextResponse.json({ order });
+    return jsonOk({ order });
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to confirm order." },
-      { status: 400 },
-    );
+    return jsonError(error.message || "Unable to confirm order.", 400);
   }
+}
+
+async function readOrderId(params) {
+  const { orderId } = await params;
+  return orderId;
 }

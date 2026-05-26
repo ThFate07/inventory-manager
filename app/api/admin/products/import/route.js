@@ -1,33 +1,29 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  readJson,
+  requireAdmin,
+} from "../../../../../lib/api-response";
 import { importProducts, listCategories, listProducts } from "../../../../../lib/inventory";
 
 export async function POST(request) {
-  const admin = await getAuthenticatedAdmin();
+  return handleImportProducts(request);
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleImportProducts(request) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
-    const body = await request.json();
-    const products = Array.isArray(body.products) ? body.products : [];
-    const importMode = body.importMode === "images-only" ? "images-only" : "sheet";
-    const returnSnapshot = body.returnSnapshot !== false;
-    const importReport = {
-      unmatchedProducts: Array.isArray(body.unmatchedProducts) ? body.unmatchedProducts : [],
-      unmatchedImages: Array.isArray(body.unmatchedImages) ? body.unmatchedImages : [],
-    };
+    const body = await readJson(request);
+    const payload = normalizeImportRequest(body);
 
-    await importProducts(products, importReport, {
-      importMode,
-      logUnmatched: body.logUnmatched !== false,
-      logSummary: body.logSummary !== false,
-      summaryProductCount: body.summaryProductCount,
-    });
+    await importProducts(payload.products, payload.importReport, payload.options);
 
-    if (!returnSnapshot) {
-      return NextResponse.json({ ok: true });
+    if (!payload.returnSnapshot) {
+      return jsonOk({ ok: true });
     }
 
     const [updatedProducts, categories] = await Promise.all([
@@ -35,11 +31,29 @@ export async function POST(request) {
       listCategories(),
     ]);
 
-    return NextResponse.json({ ok: true, products: updatedProducts, categories });
+    return jsonOk({ ok: true, products: updatedProducts, categories });
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to import products." },
-      { status: 400 },
-    );
+    return jsonError(error.message || "Unable to import products.", 400);
   }
+}
+
+function normalizeImportRequest(body) {
+  return {
+    products: Array.isArray(body.products) ? body.products : [],
+    returnSnapshot: body.returnSnapshot !== false,
+    importReport: {
+      unmatchedProducts: Array.isArray(body.unmatchedProducts)
+        ? body.unmatchedProducts
+        : [],
+      unmatchedImages: Array.isArray(body.unmatchedImages)
+        ? body.unmatchedImages
+        : [],
+    },
+    options: {
+      importMode: body.importMode === "images-only" ? "images-only" : "sheet",
+      logUnmatched: body.logUnmatched !== false,
+      logSummary: body.logSummary !== false,
+      summaryProductCount: body.summaryProductCount,
+    },
+  };
 }

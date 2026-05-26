@@ -1,25 +1,26 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  requireAdmin,
+} from "../../../../../lib/api-response";
 import { uploadProductImage } from "../../../../../lib/blob";
 
 export async function POST(request) {
-  const admin = await getAuthenticatedAdmin();
+  return handleUploadProductImage(request);
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleUploadProductImage(request) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
-    const formData = await request.formData();
-    const file = formData.get("file");
-    const productCode = String(formData.get("productCode") || "").trim();
+    const { file, productCode } = await readUploadRequest(request);
+    const validationError = validateImageUpload(file);
 
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Select an image file to upload." }, { status: 400 });
-    }
-
-    if (!file.type.startsWith("image/")) {
-      return NextResponse.json({ error: "Only image uploads are supported." }, { status: 400 });
+    if (validationError) {
+      return validationError;
     }
 
     const uploaded = await uploadProductImage(file, {
@@ -27,15 +28,33 @@ export async function POST(request) {
       sourceFileName: file.name,
     });
 
-    return NextResponse.json({
+    return jsonOk({
       ok: true,
       url: uploaded.url,
       pathname: uploaded.pathname,
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error?.message || "Unable to upload image." },
-      { status: 400 },
-    );
+    return jsonError(error?.message || "Unable to upload image.", 400);
   }
+}
+
+async function readUploadRequest(request) {
+  const formData = await request.formData();
+
+  return {
+    file: formData.get("file"),
+    productCode: String(formData.get("productCode") || "").trim(),
+  };
+}
+
+function validateImageUpload(file) {
+  if (!(file instanceof File)) {
+    return jsonError("Select an image file to upload.", 400);
+  }
+
+  if (!file.type.startsWith("image/")) {
+    return jsonError("Only image uploads are supported.", 400);
+  }
+
+  return null;
 }

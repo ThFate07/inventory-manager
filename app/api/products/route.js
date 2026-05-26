@@ -1,18 +1,19 @@
-import { NextResponse } from "next/server";
+import { jsonError, jsonOk } from "../../../lib/api-response";
 import { listCategories, listProducts } from "../../../lib/inventory";
 
 export async function GET() {
+  return handleGetProducts();
+}
+
+async function handleGetProducts() {
   try {
     const [products, categories] = await Promise.all([
       listProducts(),
       listCategories(),
     ]);
 
-    return NextResponse.json({ products, categories });
+    return jsonOk({ products, categories });
   } catch {
-    return NextResponse.json(
-      { error: "Unable to load products." },
-      { status: 500 },
-    );
+    return jsonError("Unable to load products.", 500);
   }
 }

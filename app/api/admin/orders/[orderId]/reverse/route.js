@@ -1,22 +1,30 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  requireAdmin,
+} from "../../../../../../lib/api-response";
 import { reverseConfirmedOrder } from "../../../../../../lib/inventory";
 
 export async function POST(_request, { params }) {
-  const admin = await getAuthenticatedAdmin();
+  return handleReverseOrder(params);
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleReverseOrder(params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
-    const { orderId } = await params;
+    const orderId = await readOrderId(params);
     const order = await reverseConfirmedOrder(orderId);
-    return NextResponse.json({ order });
+    return jsonOk({ order });
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to reverse order." },
-      { status: 400 },
-    );
+    return jsonError(error.message || "Unable to reverse order.", 400);
   }
+}
+
+async function readOrderId(params) {
+  const { orderId } = await params;
+  return orderId;
 }

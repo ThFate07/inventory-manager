@@ -1,46 +1,54 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  requireAdmin,
+} from "../../../../../lib/api-response";
 import { deleteOrder, getOrderByOrderId } from "../../../../../lib/inventory";
 
 export async function GET(_request, { params }) {
-  const admin = await getAuthenticatedAdmin();
-
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  try {
-    const { orderId } = await params;
-    const order = await getOrderByOrderId(orderId);
-
-    if (!order) {
-      return NextResponse.json({ error: "Order not found." }, { status: 404 });
-    }
-
-    return NextResponse.json({ order });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to load order." },
-      { status: 400 },
-    );
-  }
+  return handleGetOrder(params);
 }
 
 export async function DELETE(_request, { params }) {
-  const admin = await getAuthenticatedAdmin();
+  return handleDeleteOrder(params);
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleGetOrder(params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
-    const { orderId } = await params;
-    const result = await deleteOrder(orderId);
-    return NextResponse.json({ ok: true, ...result });
+    const orderId = await readOrderId(params);
+    const order = await getOrderByOrderId(orderId);
+
+    if (!order) {
+      return jsonError("Order not found.", 404);
+    }
+
+    return jsonOk({ order });
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to delete order." },
-      { status: 400 },
-    );
+    return jsonError(error.message || "Unable to load order.", 400);
   }
+}
+
+async function handleDeleteOrder(params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
+  try {
+    const orderId = await readOrderId(params);
+    const result = await deleteOrder(orderId);
+    return jsonOk({ ok: true, ...result });
+  } catch (error) {
+    return jsonError(error.message || "Unable to delete order.", 400);
+  }
+}
+
+async function readOrderId(params) {
+  const { orderId } = await params;
+  return orderId;
 }

@@ -1,59 +1,78 @@
-import { NextResponse } from "next/server";
 import {
   checkAdminLoginLimit,
   clearAdminLoginFailures,
   getAdminLoginIdentifier,
   recordAdminLoginFailure,
 } from "../../../../lib/admin-login-rate-limit";
+import { jsonError, jsonOk, readJson } from "../../../../lib/api-response";
 import { setAdminSession } from "../../../../lib/auth";
 import { authenticateAdmin } from "../../../../lib/inventory";
 
 export async function POST(request) {
+  return handleAdminLogin(request);
+}
+
+async function handleAdminLogin(request) {
   try {
-    const body = await request.json();
-    const username = String(body.username || "").trim();
-    const password = String(body.password || "");
+    const credentials = await readCredentials(request);
     const ipAddress = getAdminLoginIdentifier(request);
+    const validationError = validateCredentials(credentials);
 
-    if (!username || !password) {
-      return NextResponse.json(
-        { error: "Username and password are required." },
-        { status: 400 },
-      );
+    if (validationError) {
+      return jsonError(validationError, 400);
     }
 
-    const limit = checkAdminLoginLimit({ ipAddress, username });
-
-    if (!limit.allowed) {
-      return NextResponse.json(
-        { error: limit.error },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": String(limit.retryAfterSeconds),
-          },
-        },
-      );
+    const rateLimitResponse = getRateLimitResponse(ipAddress, credentials.username);
+    if (rateLimitResponse) {
+      return rateLimitResponse;
     }
 
-    const admin = await authenticateAdmin(username, password);
-
-    if (!admin) {
-      recordAdminLoginFailure({ ipAddress, username });
-      return NextResponse.json(
-        { error: "Invalid admin credentials." },
-        { status: 401 },
-      );
-    }
-
-    const response = NextResponse.json({ ok: true });
-    clearAdminLoginFailures({ ipAddress, username });
-    await setAdminSession(response, admin);
-    return response;
+    return createLoginResponse(credentials, ipAddress);
   } catch {
-    return NextResponse.json(
-      { error: "Unable to complete login." },
-      { status: 500 },
-    );
+    return jsonError("Unable to complete login.", 500);
   }
+}
+
+async function readCredentials(request) {
+  const body = await readJson(request);
+
+  return {
+    username: String(body.username || "").trim(),
+    password: String(body.password || ""),
+  };
+}
+
+function validateCredentials({ username, password }) {
+  if (!username || !password) {
+    return "Username and password are required.";
+  }
+
+  return null;
+}
+
+function getRateLimitResponse(ipAddress, username) {
+  const limit = checkAdminLoginLimit({ ipAddress, username });
+
+  if (!limit.allowed) {
+    return jsonError(limit.error, 429, {
+      headers: { "Retry-After": String(limit.retryAfterSeconds) },
+    });
+  }
+
+  return null;
+}
+
+async function createLoginResponse({ username, password }, ipAddress) {
+  const admin = await authenticateAdmin(username, password);
+
+  if (!admin) {
+    recordAdminLoginFailure({ ipAddress, username });
+    return jsonError("Invalid admin credentials.", 401);
+  }
+
+  clearAdminLoginFailures({ ipAddress, username });
+
+  const response = jsonOk({ ok: true });
+  await setAdminSession(response, admin);
+  return response;
 }

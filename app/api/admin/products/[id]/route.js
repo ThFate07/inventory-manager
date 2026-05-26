@@ -1,62 +1,65 @@
-import { NextResponse } from "next/server";
-import { getAuthenticatedAdmin } from "../../../../../lib/auth";
+import {
+  jsonError,
+  jsonOk,
+  readJson,
+  requireAdmin,
+} from "../../../../../lib/api-response";
 import { deleteProduct, updateProduct } from "../../../../../lib/inventory";
 
 export async function PATCH(request, { params }) {
-  const admin = await getAuthenticatedAdmin();
-
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  try {
-    const body = await request.json();
-    const { id } = await params;
-    await updateProduct(Number(id), body);
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Unable to update product." },
-      { status: 400 },
-    );
-  }
+  return handleUpdateProduct(request, params);
 }
 
 export async function DELETE(_request, { params }) {
-  const admin = await getAuthenticatedAdmin();
+  return handleDeleteProduct(params);
+}
 
-  if (!admin) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+async function handleUpdateProduct(request, params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {
-    const { id } = await params;
-    await deleteProduct(Number(id));
-    return NextResponse.json({ ok: true });
+    const body = await readJson(request);
+    const productId = await readProductId(params);
+    await updateProduct(productId, body);
+    return jsonOk({ ok: true });
+  } catch (error) {
+    return jsonError(error.message || "Unable to update product.", 400);
+  }
+}
+
+async function handleDeleteProduct(params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
+  try {
+    const productId = await readProductId(params);
+    await deleteProduct(productId);
+    return jsonOk({ ok: true });
   } catch (error) {
     if (error?.message === "Product not found.") {
-      return NextResponse.json(
-        { error: "Product not found." },
-        { status: 404 },
-      );
+      return jsonError("Product not found.", 404);
     }
 
     if (
       error?.code === "23503" ||
       /foreign key constraint|violates RESTRICT setting/i.test(error?.message || "")
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "This product is used in existing order records and cannot be deleted.",
-        },
-        { status: 409 },
+      return jsonError(
+        "This product is used in existing order records and cannot be deleted.",
+        409,
       );
     }
 
-    return NextResponse.json(
-      { error: error?.message || "Unable to delete product." },
-      { status: 400 },
-    );
+    return jsonError(error?.message || "Unable to delete product.", 400);
   }
+}
+
+async function readProductId(params) {
+  const { id } = await params;
+  return Number(id);
 }
