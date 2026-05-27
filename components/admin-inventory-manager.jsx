@@ -2501,14 +2501,27 @@ export default function AdminInventoryManager({
 
         {activeSection === "catalog" ? (
           <CatalogMaker
-            products={catalogSourceProducts.length > 0 ? catalogSourceProducts : products}
-            categories={catalogSourceProducts.length > 0 ? catalogSourceCategories : categories}
-            initialTitle={
-              catalogSourceProducts.length > 0 ? catalogSourceTitle : "Crockery Product Catalog"
-            }
-            sourceLabel={
-              catalogSourceProducts.length > 0 ? "Imported Excel Rows" : "Database Products"
-            }
+            initialSourceId={catalogSourceProducts.length > 0 ? "imported-excel" : "inventory"}
+            sources={[
+              {
+                id: "inventory",
+                label: "Inventory Items",
+                title: "Crockery Product Catalog",
+                products,
+                categories,
+              },
+              ...(catalogSourceProducts.length > 0
+                ? [
+                    {
+                      id: "imported-excel",
+                      label: "Imported Excel Rows",
+                      title: catalogSourceTitle,
+                      products: catalogSourceProducts,
+                      categories: catalogSourceCategories,
+                    },
+                  ]
+                : []),
+            ]}
           />
         ) : null}
       </main>

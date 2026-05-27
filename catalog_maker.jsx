@@ -230,36 +230,154 @@ export default function CatalogMaker({
   categories = [],
   initialTitle = "Product Catalog",
   sourceLabel = "Database Products",
+  sources = [],
+  initialSourceId,
 }) {
-  const [catalogTitle, setCatalogTitle] = useState(initialTitle);
+  const normalizedSources = useMemo(() => {
+    if (sources.length > 0) {
+      return sources.map((source, index) => ({
+        id: source.id || `source-${index + 1}`,
+        label: source.label || `Source ${index + 1}`,
+        title: source.title || initialTitle,
+        products: Array.isArray(source.products) ? source.products : [],
+        categories: Array.isArray(source.categories) ? source.categories : [],
+      }));
+    }
+
+    return [
+      {
+        id: "default",
+        label: sourceLabel,
+        title: initialTitle,
+        products,
+        categories,
+      },
+    ];
+  }, [categories, initialTitle, products, sourceLabel, sources]);
+  const [activeSourceId, setActiveSourceId] = useState(() => {
+    if (normalizedSources.some((source) => source.id === initialSourceId)) {
+      return initialSourceId;
+    }
+
+    return normalizedSources[0]?.id || "default";
+  });
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name-asc");
-  const [selectedProductIds, setSelectedProductIds] = useState(() =>
-    new Set(products.map((product) => product.id)),
+  const [catalogTitlesBySource, setCatalogTitlesBySource] = useState(() =>
+    Object.fromEntries(normalizedSources.map((source) => [source.id, source.title])),
+  );
+  const [selectedIdsBySource, setSelectedIdsBySource] = useState(() =>
+    Object.fromEntries(
+      normalizedSources.map((source) => [source.id, new Set(source.products.map((product) => product.id))]),
+    ),
   );
 
   useEffect(() => {
-    setSelectedProductIds((current) => {
-      const availableIds = new Set(products.map((product) => product.id));
-      const next = new Set();
+    const preferredSourceId = normalizedSources.some((source) => source.id === initialSourceId)
+      ? initialSourceId
+      : normalizedSources[0]?.id;
 
-      for (const id of current) {
-        if (availableIds.has(id)) {
-          next.add(id);
+    if (!preferredSourceId) {
+      return;
+    }
+
+    setActiveSourceId((current) => {
+      if (current === preferredSourceId && normalizedSources.some((source) => source.id === current)) {
+        return current;
+      }
+
+      if (normalizedSources.some((source) => source.id === current) && initialSourceId == null) {
+        return current;
+      }
+
+      return preferredSourceId;
+    });
+  }, [initialSourceId, normalizedSources]);
+
+  useEffect(() => {
+    setCatalogTitlesBySource((current) => {
+      const next = {};
+      let changed = false;
+
+      for (const source of normalizedSources) {
+        if (Object.prototype.hasOwnProperty.call(current, source.id)) {
+          next[source.id] = current[source.id];
+        } else {
+          next[source.id] = source.title;
+          changed = true;
         }
       }
 
-      if (current.size === 0 && products.length > 0) {
-        return new Set(products.map((product) => product.id));
+      if (Object.keys(current).length !== normalizedSources.length) {
+        changed = true;
       }
 
-      return next;
+      return changed ? next : current;
     });
-  }, [products]);
+  }, [normalizedSources]);
+
+  useEffect(() => {
+    setSelectedIdsBySource((current) => {
+      const next = {};
+      let changed = false;
+
+      for (const source of normalizedSources) {
+        const availableIds = new Set(source.products.map((product) => product.id));
+        const existing = current[source.id];
+
+        if (!existing) {
+          next[source.id] = new Set(source.products.map((product) => product.id));
+          changed = true;
+          continue;
+        }
+
+        const filtered = new Set();
+
+        for (const id of existing) {
+          if (availableIds.has(id)) {
+            filtered.add(id);
+          }
+        }
+
+        if (existing.size === 0 && source.products.length > 0) {
+          next[source.id] = new Set(source.products.map((product) => product.id));
+          changed = true;
+          continue;
+        }
+
+        if (filtered.size !== existing.size) {
+          changed = true;
+        }
+
+        next[source.id] = filtered;
+      }
+
+      if (Object.keys(current).length !== normalizedSources.length) {
+        changed = true;
+      }
+
+      return changed ? next : current;
+    });
+  }, [normalizedSources]);
+
+  useEffect(() => {
+    setSearch("");
+    setCategoryFilter("all");
+  }, [activeSourceId]);
+
+  const activeSource = useMemo(
+    () => normalizedSources.find((source) => source.id === activeSourceId) || normalizedSources[0],
+    [activeSourceId, normalizedSources],
+  );
+  const activeProducts = activeSource?.products || [];
+  const activeCategories = activeSource?.categories || [];
+  const activeSourceLabel = activeSource?.label || sourceLabel;
+  const catalogTitle = catalogTitlesBySource[activeSource?.id] || activeSource?.title || initialTitle;
+  const selectedProductIds = selectedIdsBySource[activeSource?.id] || new Set();
 
   const sortedProducts = useMemo(() => {
-    const sorted = [...products];
+    const sorted = [...activeProducts];
 
     sorted.sort((left, right) => {
       switch (sortBy) {
@@ -289,14 +407,13 @@ export default function CatalogMaker({
     });
 
     return sorted;
-  }, [products, sortBy]);
+  }, [activeProducts, sortBy]);
 
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
     return sortedProducts.filter((product) => {
-      const matchesCategory =
-        categoryFilter === "all" || product.category === categoryFilter;
+      const matchesCategory = categoryFilter === "all" || product.category === categoryFilter;
       const matchesSearch =
         normalizedSearch.length === 0 ||
         product.name.toLowerCase().includes(normalizedSearch) ||
@@ -334,38 +451,71 @@ export default function CatalogMaker({
   );
 
   const totalSelected = useMemo(
-    () => products.filter((product) => selectedProductIds.has(product.id)).length,
-    [products, selectedProductIds],
+    () => activeProducts.filter((product) => selectedProductIds.has(product.id)).length,
+    [activeProducts, selectedProductIds],
   );
 
   function toggleSelection(productId) {
-    setSelectedProductIds((current) => {
-      const next = new Set(current);
-      if (next.has(productId)) {
-        next.delete(productId);
+    if (!activeSource) {
+      return;
+    }
+
+    setSelectedIdsBySource((current) => {
+      const currentSelection = current[activeSource.id] || new Set();
+      const nextSelection = new Set(currentSelection);
+
+      if (nextSelection.has(productId)) {
+        nextSelection.delete(productId);
       } else {
-        next.add(productId);
+        nextSelection.add(productId);
       }
-      return next;
+
+      return {
+        ...current,
+        [activeSource.id]: nextSelection,
+      };
     });
   }
 
   function selectAllFiltered() {
-    setSelectedProductIds((current) => {
-      const next = new Set(current);
+    if (!activeSource) {
+      return;
+    }
+
+    setSelectedIdsBySource((current) => {
+      const nextSelection = new Set(current[activeSource.id] || []);
+
       for (const product of filteredProducts) {
-        next.add(product.id);
+        nextSelection.add(product.id);
       }
-      return next;
+
+      return {
+        ...current,
+        [activeSource.id]: nextSelection,
+      };
     });
   }
 
   function selectAllProducts() {
-    setSelectedProductIds(new Set(products.map((product) => product.id)));
+    if (!activeSource) {
+      return;
+    }
+
+    setSelectedIdsBySource((current) => ({
+      ...current,
+      [activeSource.id]: new Set(activeProducts.map((product) => product.id)),
+    }));
   }
 
   function clearSelection() {
-    setSelectedProductIds(new Set());
+    if (!activeSource) {
+      return;
+    }
+
+    setSelectedIdsBySource((current) => ({
+      ...current,
+      [activeSource.id]: new Set(),
+    }));
   }
 
   function handlePrint() {
@@ -453,9 +603,9 @@ export default function CatalogMaker({
               <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[360px]">
                 <div className="rounded-[1.5rem] border border-stone-200 bg-stone-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
-                    {sourceLabel}
+                    {activeSourceLabel}
                   </p>
-                  <p className="mt-2 text-2xl font-bold text-stone-900">{products.length}</p>
+                  <p className="mt-2 text-2xl font-bold text-stone-900">{activeProducts.length}</p>
                 </div>
                 <div className="rounded-[1.5rem] border border-stone-200 bg-stone-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
@@ -492,7 +642,12 @@ export default function CatalogMaker({
                   </span>
                   <input
                     value={catalogTitle}
-                    onChange={(event) => setCatalogTitle(event.target.value)}
+                    onChange={(event) =>
+                      setCatalogTitlesBySource((current) => ({
+                        ...current,
+                        [activeSource.id]: event.target.value,
+                      }))
+                    }
                     className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400"
                     placeholder="Catalog title"
                   />
@@ -500,14 +655,43 @@ export default function CatalogMaker({
               </section>
 
               <section className="rounded-[1.75rem] border border-stone-200 bg-stone-50 p-5">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
-                    Filter Products
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-stone-500">
-                    Search the current source, narrow to a category, then sort the current result
-                    set before selecting products.
-                  </p>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
+                      Filter Products
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-stone-500">
+                      Search the current source, narrow to a category, then sort the current result
+                      set before selecting products.
+                    </p>
+                  </div>
+                  {normalizedSources.length > 1 ? (
+                    <div className="w-full max-w-sm">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                        Catalog Source
+                      </span>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {normalizedSources.map((source) => {
+                          const isActive = source.id === activeSource.id;
+
+                          return (
+                            <button
+                              key={source.id}
+                              type="button"
+                              onClick={() => setActiveSourceId(source.id)}
+                              className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                                isActive
+                                  ? "border-orange-500 bg-orange-50 text-orange-700"
+                                  : "border-stone-200 bg-white text-stone-600 hover:border-stone-300"
+                              }`}
+                            >
+                              {source.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -533,7 +717,7 @@ export default function CatalogMaker({
                       className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400"
                     >
                       <option value="all">All Categories</option>
-                      {categories.map((category) => (
+                      {activeCategories.map((category) => (
                         <option key={category.id} value={category.name}>
                           {category.name}
                         </option>
@@ -571,7 +755,7 @@ export default function CatalogMaker({
                     Selection Actions
                   </p>
                   <p className="mt-2 text-sm leading-6 text-stone-500">
-                    {totalSelected} selected from {products.length} items in the current source.
+                    {totalSelected} selected from {activeProducts.length} items in the current source.
                     Current filter shows {filteredProducts.length} products, with {selectedProductsInView} already included.
                   </p>
                 </div>
