@@ -274,24 +274,16 @@ export default function CatalogMaker({
   );
 
   useEffect(() => {
-    const preferredSourceId = normalizedSources.some((source) => source.id === initialSourceId)
-      ? initialSourceId
-      : normalizedSources[0]?.id;
-
-    if (!preferredSourceId) {
-      return;
-    }
-
     setActiveSourceId((current) => {
-      if (current === preferredSourceId && normalizedSources.some((source) => source.id === current)) {
+      if (normalizedSources.some((source) => source.id === current)) {
         return current;
       }
 
-      if (normalizedSources.some((source) => source.id === current) && initialSourceId == null) {
-        return current;
+      if (normalizedSources.some((source) => source.id === initialSourceId)) {
+        return initialSourceId;
       }
 
-      return preferredSourceId;
+      return normalizedSources[0]?.id || "default";
     });
   }, [initialSourceId, normalizedSources]);
 
