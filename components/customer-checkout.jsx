@@ -49,6 +49,10 @@ function writeCart(cart) {
   window.dispatchEvent(new Event("cart-updated"));
 }
 
+function hasTrackedStockValue(stockQuantity) {
+  return Number.isFinite(Number(stockQuantity));
+}
+
 export default function CustomerCheckout({ initialProducts = [] }) {
   const [cart, setCart] = useState([]);
   const [checkoutForm, setCheckoutForm] = useState(emptyCheckoutForm());
@@ -78,8 +82,13 @@ export default function CustomerCheckout({ initialProducts = [] }) {
   );
 
   const cartTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.quantity * item.unitPriceInr, 0),
-    [cart],
+    () =>
+      cart.reduce((sum, item) => {
+        const currentProduct = productsById.get(item.productId);
+        const unitPriceInr = Number(currentProduct?.unitPriceInr ?? item.unitPriceInr ?? 0);
+        return sum + Number(item.quantity || 0) * unitPriceInr;
+      }, 0),
+    [cart, productsById],
   );
 
   function updateCartQuantity(productId, value) {
@@ -89,7 +98,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
     const piecesPerCarton = getPiecesPerCartonValue(qtyPerCtn) || 1;
     const cartonQuantity = Math.max(1, Math.floor(Number(value) || 1));
     const maxCartons = getMaxCartonQuantity(product?.stockQuantity, qtyPerCtn);
-    const hasTrackedStock = Number(product?.stockQuantity) > 0;
+    const hasTrackedStock = hasTrackedStockValue(product?.stockQuantity);
 
     if (hasTrackedStock && maxCartons === 0) {
       setCartErrors((current) => ({
@@ -151,6 +160,15 @@ export default function CustomerCheckout({ initialProducts = [] }) {
 
     if (cart.length === 0) {
       setCheckoutError("Add at least one item to the cart before checkout.");
+      return;
+    }
+
+    const missingProduct = cart.find((item) => !productsById.has(item.productId));
+
+    if (missingProduct) {
+      setCheckoutError(
+        `${missingProduct.productName} is no longer available. Remove it from the cart and try again.`,
+      );
       return;
     }
 
@@ -228,9 +246,10 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                 (() => {
                   const product = productsById.get(item.productId);
                   const qtyPerCtn = product?.qtyPerCtn || item.qtyPerCtn;
+                  const unitPriceInr = Number(product?.unitPriceInr ?? item.unitPriceInr ?? 0);
                   const priceUnitLabel = getPricingUnitLabel(item.productName);
                   const cartonQuantity = getStoredCartonQuantity(item);
-                  const cartonPrice = getCartonPrice(item.unitPriceInr, qtyPerCtn);
+                  const cartonPrice = getCartonPrice(unitPriceInr, qtyPerCtn);
                   const maxCartons = getMaxCartonQuantity(product?.stockQuantity, qtyPerCtn);
 
                   return (
@@ -243,7 +262,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                           <p className="font-semibold text-gray-900">{item.productName}</p>
                           <p className="text-sm text-gray-500">{item.productCode}</p>
                           <p className="mt-1 text-sm font-medium text-gray-500">
-                            {formatCurrency(item.unitPriceInr)} / {priceUnitLabel}
+                            {formatCurrency(unitPriceInr)} / {priceUnitLabel}
                           </p>
                           <p className="text-sm font-medium text-gray-500">
                             {formatCurrency(cartonPrice)} / CTN
@@ -281,7 +300,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                           ) : null}
                         </div>
                         <p className="text-base font-semibold text-green-600 sm:text-right">
-                          {formatCurrency(item.unitPriceInr * item.quantity)}
+                          {formatCurrency(unitPriceInr * item.quantity)}
                         </p>
                       </div>
                     </div>

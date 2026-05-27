@@ -139,10 +139,68 @@ async function main() {
         id bigserial primary key,
         order_id bigint not null references orders(id) on delete cascade,
         product_id bigint not null references products(id) on delete restrict,
+        product_code text not null default '',
+        product_name text not null default '',
+        category text not null default '',
+        ctn text not null default '',
+        qty_per_ctn text not null default '',
+        image_url text not null default '',
         quantity integer not null check (quantity > 0),
         unit_price_inr numeric(12, 2) not null default 0,
         created_at timestamptz not null default now()
       );
+    `);
+
+    await client.query(`
+      alter table order_items
+      add column if not exists product_code text not null default '';
+    `);
+
+    await client.query(`
+      alter table order_items
+      add column if not exists product_name text not null default '';
+    `);
+
+    await client.query(`
+      alter table order_items
+      add column if not exists category text not null default '';
+    `);
+
+    await client.query(`
+      alter table order_items
+      add column if not exists ctn text not null default '';
+    `);
+
+    await client.query(`
+      alter table order_items
+      add column if not exists qty_per_ctn text not null default '';
+    `);
+
+    await client.query(`
+      alter table order_items
+      add column if not exists image_url text not null default '';
+    `);
+
+    await client.query(`
+      update order_items
+      set
+        product_code = products.code,
+        product_name = products.name,
+        category = categories.name,
+        ctn = products.ctn,
+        qty_per_ctn = products.qty_per_ctn,
+        image_url = products.image_url
+      from products
+      join categories on categories.id = products.category_id
+      where order_items.product_id = products.id
+        and (
+          order_items.product_code = ''
+          or order_items.product_name = ''
+          or order_items.category = ''
+          or order_items.ctn = ''
+          or order_items.qty_per_ctn = ''
+          or order_items.image_url = ''
+        );
     `);
 
     await client.query(`
@@ -162,47 +220,6 @@ async function main() {
       alter table inventory_activity_logs
       add column if not exists category text;
     `);
-
-    for (const categoryName of [...new Set(sampleProducts.map((product) => product.category))]) {
-      await client.query(
-        `
-          insert into categories (name, slug)
-          values ($1, $2)
-          on conflict (name)
-          do update set slug = excluded.slug
-        `,
-        [categoryName, slugifyCategory(categoryName)],
-      );
-    }
-
-    const productCountResult = await client.query("select count(*)::int as count from products");
-
-    if (productCountResult.rows[0]?.count === 0) {
-      for (const product of sampleProducts) {
-        const categoryResult = await client.query(
-          "select id from categories where name = $1",
-          [product.category],
-        );
-
-        await client.query(
-          `
-            insert into products (code, name, category_id, ctn, qty_per_ctn, catalog_unit, stock_quantity, unit_price_inr, image_url)
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          `,
-          [
-            product.code,
-            product.name,
-            categoryResult.rows[0].id,
-            product.ctn || "",
-            product.qtyPerCtn || "",
-            product.catalogUnit || "1 pcs",
-            product.stockQuantity,
-            product.unitPriceInr,
-            product.imageUrl,
-          ],
-        );
-      }
-    }
 
     const username = process.env.ADMIN_USERNAME || "admin";
     const password = process.env.ADMIN_PASSWORD || "admin123";

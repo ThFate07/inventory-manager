@@ -58,6 +58,10 @@ function writeCart(cart) {
   window.dispatchEvent(new Event("cart-updated"));
 }
 
+function hasTrackedStockValue(stockQuantity) {
+  return Number.isFinite(Number(stockQuantity));
+}
+
 function CustomerProductCard({
   product,
   cartQuantity,
@@ -72,7 +76,7 @@ function CustomerProductCard({
   const priceUnitLabel = getPricingUnitLabel(product.name);
   const piecesPerCarton = getPiecesPerCartonValue(product.qtyPerCtn);
   const cartonPrice = getCartonPrice(product.unitPriceInr, product.qtyPerCtn);
-  const hasTrackedStock = Number(product.stockQuantity) > 0;
+  const hasTrackedStock = hasTrackedStockValue(product.stockQuantity);
   const maxCartons = getMaxCartonQuantity(product.stockQuantity, product.qtyPerCtn);
   const isOutOfStock = hasTrackedStock && maxCartons === 0;
 
@@ -275,19 +279,20 @@ export default function CrockeryInventoryManager({
         : 1;
     const piecesPerCarton = getPiecesPerCartonValue(product.qtyPerCtn) || 1;
     const maxCartons = getMaxCartonQuantity(product.stockQuantity, product.qtyPerCtn);
+    const hasTrackedStock = hasTrackedStockValue(product.stockQuantity);
 
     const currentCart = readCart();
     const existing = currentCart.find((item) => item.productId === product.id);
     const existingCartons = existing ? getStoredCartonQuantity(existing) : 0;
     const requestedCartons = existingCartons + cartonQuantity;
 
-    if (Number(product.stockQuantity) > 0 && maxCartons === 0) {
+    if (hasTrackedStock && maxCartons === 0) {
       setQuantityError(product.id, "This many cartons are not available in stock.");
       showToast("This product is out of stock", "error");
       return;
     }
 
-    if (maxCartons > 0 && requestedCartons > maxCartons) {
+    if (hasTrackedStock && requestedCartons > maxCartons) {
       setQuantityError(
         product.id,
         `Only ${maxCartons} carton${maxCartons === 1 ? "" : "s"} are available in stock.`,
