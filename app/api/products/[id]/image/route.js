@@ -43,7 +43,7 @@ async function handleGetProductImage(params) {
       status: 200,
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-store",
       },
     });
   } catch {
