@@ -192,6 +192,17 @@ async function parseJsonResponse(response) {
 }
 
 async function uploadImageFile(file, { productCode = "" } = {}) {
+  return uploadImageToEndpoint("/api/admin/uploads/product-image", file, { productCode });
+}
+
+async function uploadCatalogTempImageFile(file, { productCode = "", sessionId = "" } = {}) {
+  return uploadImageToEndpoint("/api/admin/uploads/catalog-temp", file, {
+    productCode,
+    sessionId,
+  });
+}
+
+async function uploadImageToEndpoint(endpoint, file, { productCode = "", sessionId = "" } = {}) {
   if (!file) {
     throw new Error("Select an image file to upload.");
   }
@@ -203,7 +214,11 @@ async function uploadImageFile(file, { productCode = "" } = {}) {
     formData.append("productCode", productCode);
   }
 
-  const response = await fetch("/api/admin/uploads/product-image", {
+  if (sessionId) {
+    formData.append("sessionId", sessionId);
+  }
+
+  const response = await fetch(endpoint, {
     method: "POST",
     body: formData,
   });
@@ -1253,10 +1268,21 @@ export default function AdminInventoryManager({
         );
       }
 
+      const catalogUploadSessionId =
+        importWorkflow === "catalog"
+          ? `catalog-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+          : "";
+
       const imageDataByCode = new Map(
         await Promise.all(
           Array.from(matchedFilesByCode.entries()).map(async ([codeKey, matchedFile]) => {
-            const uploadedUrl = await uploadImageFile(matchedFile, { productCode: codeKey });
+            const uploadedUrl =
+              importWorkflow === "catalog"
+                ? await uploadCatalogTempImageFile(matchedFile, {
+                    productCode: codeKey,
+                    sessionId: catalogUploadSessionId,
+                  })
+                : await uploadImageFile(matchedFile, { productCode: codeKey });
             return [codeKey, uploadedUrl];
           }),
         ),
