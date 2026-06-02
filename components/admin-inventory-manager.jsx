@@ -2066,8 +2066,13 @@ export default function AdminInventoryManager({
                           ) : null}
                         </div>
 
-                        <div className="flex items-center justify-between gap-4 rounded-2xl bg-stone-50 px-4 py-3">
-                          <p className="text-gray-600">Stock: {product.stockQuantity}</p>
+                        <div className="flex flex-col gap-3 rounded-2xl bg-stone-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex flex-wrap items-center gap-4">
+                            <p className="text-gray-600">Stock: {product.stockQuantity}</p>
+                            {product.ctn ? (
+                              <p className="text-gray-500">CTN: {product.ctn}</p>
+                            ) : null}
+                          </div>
                           <p className="text-lg font-bold text-green-600">
                             {formatCurrency(product.unitPriceInr)}
                           </p>

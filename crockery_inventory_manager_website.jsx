@@ -145,23 +145,35 @@ function CustomerProductCard({
         ) : null}
 
         <div className="mt-3 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:items-center sm:gap-3">
-          <div className="flex w-full items-center rounded-xl border border-orange-200 bg-white sm:w-auto">
-            <input
-              type="number"
-              min="1"
-              value={cartQuantity}
-              onChange={(event) => onSetQuantity(product.id, event.target.value)}
-              onBlur={(event) => {
-                if (event.target.value.trim() === "") {
-                  onSetQuantity(product.id, "1");
-                }
-              }}
-              disabled={isAdding}
-              className="h-9 w-full min-w-0 rounded-l-xl px-3 py-2 text-sm outline-none disabled:opacity-50 sm:h-11 sm:w-24 sm:text-base"
-            />
-            <span className="flex h-9 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:h-11 sm:text-sm">
-              CTN
-            </span>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="flex flex-1 items-center rounded-xl border border-orange-200 bg-white sm:flex-none">
+              <input
+                type="number"
+                min="1"
+                value={cartQuantity}
+                onChange={(event) => onSetQuantity(product.id, event.target.value)}
+                onBlur={(event) => {
+                  if (event.target.value.trim() === "") {
+                    onSetQuantity(product.id, "1");
+                  }
+                }}
+                disabled={isAdding}
+                className="h-9 w-full min-w-0 rounded-l-xl px-3 py-2 text-sm outline-none disabled:opacity-50 sm:h-11 sm:w-24 sm:text-base"
+              />
+              <span className="flex h-9 shrink-0 items-center border-l border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:h-11 sm:text-sm">
+                CTN
+              </span>
+            </div>
+            {hasTrackedStock && maxCartons > 0 ? (
+              <button
+                type="button"
+                onClick={() => onSetQuantity(product.id, String(maxCartons))}
+                disabled={isAdding}
+                className="h-9 rounded-xl border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-600 transition hover:bg-orange-100 disabled:opacity-50 sm:h-11 sm:text-sm"
+              >
+                Max
+              </button>
+            ) : null}
           </div>
           <button
             type="button"

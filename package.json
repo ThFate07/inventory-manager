@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "db:setup": "node --env-file=.env.local scripts/setup-database.mjs",
+    "db:report": "node --env-file=.env.local scripts/db-report.mjs",
+    "db:backup": "node --env-file=.env.local scripts/db-backup.mjs",
     "blob:migrate-db-images": "node --env-file=.env.local scripts/migrate-product-images-to-blob.mjs"
   },
   "dependencies": {
