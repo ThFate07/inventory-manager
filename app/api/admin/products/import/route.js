@@ -71,6 +71,7 @@ function normalizeImportRequest(body) {
       logUnmatched: body.logUnmatched !== false,
       logSummary: body.logSummary !== false,
       summaryProductCount: body.summaryProductCount,
+      importBatchId: body.importBatchId,
     },
   };
 }

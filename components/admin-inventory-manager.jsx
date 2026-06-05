@@ -415,6 +415,8 @@ function StatusPill({ children, tone = "neutral" }) {
   const toneClassName =
     tone === "success"
       ? "bg-emerald-100 text-emerald-700"
+      : tone === "danger"
+        ? "bg-rose-100 text-rose-700"
       : tone === "warning"
         ? "bg-amber-100 text-amber-700"
         : "bg-stone-200 text-stone-700";
@@ -427,7 +429,12 @@ function StatusPill({ children, tone = "neutral" }) {
 }
 
 function getLogTone(action) {
-  if (action === "product_deleted" || action === "import_image_unmatched_product") {
+  if (
+    action === "product_deleted" ||
+    action === "import_image_unmatched_product" ||
+    action === "product_import_failed" ||
+    action === "import_batch_undone"
+  ) {
     return "warning";
   }
 
@@ -459,6 +466,8 @@ function getLogLabel(action) {
     product_deleted: "Deleted",
     product_imported: "Imported",
     product_created_from_import: "Imported New",
+    product_import_failed: "Failed",
+    import_batch_undone: "Undone",
     import_image_unmatched_product: "Missing Image",
     import_image_unmatched_file: "Unused Image",
     products_cleared: "Cleared All",
@@ -479,6 +488,8 @@ function getLogType(action) {
   if (
     action === "product_imported" ||
     action === "product_created_from_import" ||
+    action === "product_import_failed" ||
+    action === "import_batch_undone" ||
     action === "inventory_import_summary" ||
     action === "import_image_unmatched_product" ||
     action === "import_image_unmatched_file"
@@ -523,6 +534,119 @@ function getLogTypeLabel(type) {
   };
 
   return labels[type] || type;
+}
+
+function groupImportLogs(logs) {
+  const groupedByBatch = new Map();
+  const standaloneLogs = [];
+
+  for (const log of logs) {
+    if (!log.importBatchId) {
+      standaloneLogs.push({ kind: "log", sortTime: log.createdAt, log });
+      continue;
+    }
+
+    const groupKey = log.importBatchId;
+    const currentGroup =
+      groupedByBatch.get(groupKey) ||
+      {
+        kind: "import-group",
+        groupKey,
+        summary: null,
+        items: [],
+        sortTime: log.createdAt,
+      };
+
+    currentGroup.sortTime =
+      !currentGroup.sortTime || new Date(log.createdAt) > new Date(currentGroup.sortTime)
+        ? log.createdAt
+        : currentGroup.sortTime;
+
+    if (log.action === "inventory_import_summary") {
+      currentGroup.summary = log;
+    } else if (log.action === "import_batch_undone") {
+      currentGroup.undoLog = log;
+    } else {
+      currentGroup.items.push(log);
+    }
+
+    groupedByBatch.set(groupKey, currentGroup);
+  }
+
+  const groupedEntries = Array.from(groupedByBatch.values()).map((group) => {
+    const items = [...group.items].sort(
+      (left, right) => new Date(left.createdAt) - new Date(right.createdAt),
+    );
+    const successCount = items.filter(
+      (item) => item.action === "product_imported" || item.action === "product_created_from_import",
+    ).length;
+    const failureCount = items.filter((item) => item.action === "product_import_failed").length;
+    const createdCount = items.filter((item) => item.action === "product_created_from_import").length;
+    const updatedCount = items.filter((item) => item.action === "product_imported").length;
+
+    return {
+      ...group,
+      items,
+      undoLog: group.undoLog || null,
+      isUndone: Boolean(group.undoLog),
+      successCount,
+      failureCount,
+      createdCount,
+      updatedCount,
+      totalCount: items.length,
+    };
+  });
+
+  return [...standaloneLogs, ...groupedEntries].sort(
+    (left, right) => new Date(right.sortTime) - new Date(left.sortTime),
+  );
+}
+
+function getImportLogTitle() {
+  return "Log of Import";
+}
+
+function getImportLogSubtitle(group) {
+  const totalCount = group.totalCount || 0;
+  const failureCount = group.failureCount || 0;
+
+  return `${totalCount} item${totalCount === 1 ? "" : "s"} in this batch${failureCount > 0 ? `, ${failureCount} error${failureCount === 1 ? "" : "s"}` : ""}${group.isUndone ? ", undone" : ""}`;
+}
+
+function ImportLogRow({ log }) {
+  const tone =
+    log.action === "product_import_failed"
+      ? "danger"
+      : log.action === "product_created_from_import"
+        ? "success"
+        : log.action === "product_imported"
+          ? "neutral"
+          : getLogTone(log.action);
+
+  const label =
+    log.action === "product_imported"
+      ? "Updated"
+      : log.action === "product_created_from_import"
+        ? "Created"
+        : getLogLabel(log.action);
+
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusPill tone={tone}>{label}</StatusPill>
+        <span className="text-xs uppercase tracking-[0.2em] text-stone-400">
+          {log.productCode || "Inventory"}
+        </span>
+      </div>
+      <h5 className="mt-3 text-base font-bold text-stone-900">
+        {log.productName || "Inventory record"}
+      </h5>
+      <p className="mt-2 text-sm leading-6 text-stone-600">{log.details}</p>
+      <p className="mt-3 text-xs uppercase tracking-[0.2em] text-stone-400">
+        {formatDateTime(log.createdAt)}
+      </p>
+    </div>
+  );
 }
 
 function RecentOrdersPanel({ orders = [], expanded = false }) {
@@ -716,8 +840,10 @@ function RecentOrdersPanel({ orders = [], expanded = false }) {
   );
 }
 
-function InventoryLogPanel({ logs = [] }) {
+function InventoryLogPanel({ logs = [], onUndoImportBatch = null }) {
   const [selectedType, setSelectedType] = useState("all");
+  const [openGroupIds, setOpenGroupIds] = useState(() => new Set());
+  const [undoingGroupId, setUndoingGroupId] = useState("");
 
   const filteredLogs = useMemo(() => {
     if (selectedType === "all") {
@@ -727,10 +853,48 @@ function InventoryLogPanel({ logs = [] }) {
     return logs.filter((log) => getLogType(log.action) === selectedType);
   }, [logs, selectedType]);
 
+  const displayEntries = useMemo(() => groupImportLogs(filteredLogs), [filteredLogs]);
+
   const availableTypes = useMemo(() => {
     const types = new Set(logs.map((log) => getLogType(log.action)));
     return ["all", ...Array.from(types)];
   }, [logs]);
+
+  function toggleGroup(groupKey) {
+    setOpenGroupIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+
+      return next;
+    });
+  }
+
+  async function handleUndoGroup(entry) {
+    if (!onUndoImportBatch) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Undo this import batch? This will try to restore the products to their pre-import state and delete products that were newly created by the batch.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setUndoingGroupId(entry.groupKey);
+
+    try {
+      await onUndoImportBatch(entry.groupKey);
+    } finally {
+      setUndoingGroupId("");
+    }
+  }
 
   return (
     <section className="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-xl">
@@ -766,40 +930,160 @@ function InventoryLogPanel({ logs = [] }) {
       </div>
 
       <div className="mt-6 space-y-4">
-        {filteredLogs.length === 0 ? (
+        {displayEntries.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 p-5 text-sm text-stone-500">
             No inventory logs match the selected type.
           </div>
         ) : (
-          filteredLogs.map((log) => (
-            <article
-              key={log.id}
-              className="rounded-[1.5rem] border border-stone-200 bg-stone-50 p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusPill tone={getLogTone(log.action)}>
-                      {getLogLabel(log.action)}
-                    </StatusPill>
-                    <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">
-                      {getLogTypeLabel(getLogType(log.action))}
-                    </span>
-                    <span className="text-xs uppercase tracking-[0.2em] text-stone-400">
-                      {log.productCode || "Inventory"}
-                    </span>
+          displayEntries.map((entry) => {
+            if (entry.kind === "import-group") {
+              const isOpen = openGroupIds.has(entry.groupKey);
+              const summaryTone = entry.failureCount > 0 ? "warning" : "success";
+
+              return (
+                <article
+                  key={entry.groupKey}
+                  className="rounded-[1.5rem] border border-stone-200 bg-stone-50 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusPill tone={summaryTone}>Import Log</StatusPill>
+                        <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">
+                          {getLogTypeLabel("import")}
+                        </span>
+                        <span className="text-xs uppercase tracking-[0.2em] text-stone-400">
+                          {entry.totalCount} item{entry.totalCount === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <h4 className="mt-3 text-lg font-bold text-stone-900">
+                        {getImportLogTitle(entry)}
+                      </h4>
+                      <p className="mt-2 text-sm leading-6 text-stone-600">
+                        {getImportLogSubtitle(entry)}
+                      </p>
+                      <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                        <span className="rounded-full bg-white px-3 py-1">
+                          Added {entry.createdCount}
+                        </span>
+                        <span className="rounded-full bg-white px-3 py-1">
+                          Updated {entry.updatedCount}
+                        </span>
+                        <span className="rounded-full bg-white px-3 py-1">
+                          Failed {entry.failureCount}
+                        </span>
+                        {entry.isUndone ? (
+                          <span className="rounded-full bg-rose-100 px-3 py-1 text-rose-700">
+                            Undone
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <span className="text-xs text-stone-400">
+                        {formatDateTime(entry.sortTime)}
+                      </span>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(entry.groupKey)}
+                          className="rounded-xl border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
+                        >
+                          {isOpen ? "Hide Details" : "View Details"}
+                        </button>
+                        {onUndoImportBatch ? (
+                          <button
+                            type="button"
+                            onClick={() => handleUndoGroup(entry)}
+                            disabled={entry.isUndone || undoingGroupId === entry.groupKey}
+                            className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                              entry.isUndone || undoingGroupId === entry.groupKey
+                                ? "cursor-not-allowed border-stone-200 bg-stone-100 text-stone-400"
+                                : "border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
+                            }`}
+                          >
+                            {entry.isUndone
+                              ? "Undone"
+                              : undoingGroupId === entry.groupKey
+                                ? "Undoing..."
+                                : "Undo Batch"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
-                  <h4 className="mt-3 text-lg font-bold text-stone-900">
-                    {log.productName || "Inventory record"}
-                  </h4>
-                  <p className="mt-2 text-sm leading-6 text-stone-600">{log.details}</p>
+
+                  {isOpen ? (
+                    <div className="mt-4 space-y-3 rounded-[1.5rem] border border-stone-200 bg-white p-4">
+                      {entry.summary ? (
+                        <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusPill tone={summaryTone}>{getLogLabel(entry.summary.action)}</StatusPill>
+                            <span className="text-xs uppercase tracking-[0.2em] text-stone-400">
+                              Batch summary
+                            </span>
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-stone-600">
+                            {entry.summary.details}
+                          </p>
+                          <p className="mt-3 text-xs uppercase tracking-[0.2em] text-stone-400">
+                            {formatDateTime(entry.summary.createdAt)}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {entry.undoLog ? (
+                        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusPill tone="warning">{getLogLabel(entry.undoLog.action)}</StatusPill>
+                            <span className="text-xs uppercase tracking-[0.2em] text-rose-500">
+                              Reversal
+                            </span>
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-rose-900">
+                            {entry.undoLog.details}
+                          </p>
+                          <p className="mt-3 text-xs uppercase tracking-[0.2em] text-rose-500">
+                            {formatDateTime(entry.undoLog.createdAt)}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {entry.items.map((log) => (
+                        <ImportLogRow key={log.id} log={log} />
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            }
+
+            const log = entry.log;
+            return (
+              <article key={log.id} className="rounded-[1.5rem] border border-stone-200 bg-stone-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusPill tone={getLogTone(log.action)}>{getLogLabel(log.action)}</StatusPill>
+                      <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">
+                        {getLogTypeLabel(getLogType(log.action))}
+                      </span>
+                      <span className="text-xs uppercase tracking-[0.2em] text-stone-400">
+                        {log.productCode || "Inventory"}
+                      </span>
+                    </div>
+                    <h4 className="mt-3 text-lg font-bold text-stone-900">
+                      {log.productName || "Inventory record"}
+                    </h4>
+                    <p className="mt-2 text-sm leading-6 text-stone-600">{log.details}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-stone-400">
+                    {formatDateTime(log.createdAt)}
+                  </span>
                 </div>
-                <span className="shrink-0 text-xs text-stone-400">
-                  {formatDateTime(log.createdAt)}
-                </span>
-              </div>
-            </article>
-          ))
+              </article>
+            );
+          })
         )}
       </div>
     </section>
@@ -1068,6 +1352,35 @@ export default function AdminInventoryManager({
     setInventoryLogs(payload.inventoryLogs || []);
   }
 
+  async function handleUndoImportBatch(importBatchId) {
+    setError("");
+    clearImportStatus();
+
+    try {
+      const response = await fetch(
+        `/api/admin/import-batches/${encodeURIComponent(importBatchId)}/undo`,
+        {
+          method: "POST",
+        },
+      );
+
+      const payload = await parseJsonResponse(response);
+
+      if (!response.ok) {
+        setError(payload.error || "Could not undo import batch.");
+        return;
+      }
+
+      await refreshDashboard();
+      showImportStatus(
+        `Reversed import batch with ${payload.undoneCount || 0} product change${payload.undoneCount === 1 ? "" : "s"}.`,
+        "warning",
+      );
+    } catch (caughtError) {
+      setError(getImportErrorMessage(caughtError, "Could not undo import batch."));
+    }
+  }
+
   function updateForm(field, value) {
     setForm((current) => ({
       ...current,
@@ -1258,6 +1571,10 @@ export default function AdminInventoryManager({
               Image: product.imageUrl,
             }));
 
+      const existingProductsByCode = new Map(
+        products.map((product) => [normalizeCodeKey(product.code), product]),
+      );
+
       const matchedFilesByCode = new Map();
       for (const [codeKey, groupedFiles] of imageFilesByCode.entries()) {
         if (groupedFiles?.length) {
@@ -1311,7 +1628,16 @@ export default function AdminInventoryManager({
                 name: getImportedItemName(item) || "Unnamed Product",
                 category: item.category || item.Category || "General",
               }))
-              .filter((product) => !matchedRowCodes.has(normalizeCodeKey(product.code)))
+              .filter((product) => {
+                const codeKey = normalizeCodeKey(product.code);
+
+                if (matchedRowCodes.has(codeKey)) {
+                  return false;
+                }
+
+                const existingProduct = existingProductsByCode.get(codeKey);
+                return !existingProduct?.imageUrl;
+              })
           : [];
 
       const unmatchedImages = Array.from(imageFilesByCode.entries()).flatMap(([codeKey, files]) => {
@@ -1391,6 +1717,10 @@ export default function AdminInventoryManager({
       }
 
       const importMode = importFile ? "sheet" : "images-only";
+      const importBatchId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `import-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const basePayload = {
         importMode,
         unmatchedProducts: [],
@@ -1424,6 +1754,7 @@ export default function AdminInventoryManager({
             logUnmatched: isFinalChunk,
             logSummary: isFinalChunk,
             summaryProductCount: isFinalChunk ? normalizedProducts.length : undefined,
+            importBatchId,
             returnSnapshot: false,
           }),
         });
@@ -2426,7 +2757,7 @@ export default function AdminInventoryManager({
               </p>
 
               <div className="mt-8">
-                <InventoryLogPanel logs={inventoryLogs} />
+                <InventoryLogPanel logs={inventoryLogs} onUndoImportBatch={handleUndoImportBatch} />
               </div>
             </section>
         ) : null}

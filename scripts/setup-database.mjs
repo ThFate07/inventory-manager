@@ -207,10 +207,12 @@ async function main() {
       create table if not exists inventory_activity_logs (
         id bigserial primary key,
         action text not null,
+        import_batch_id text,
         product_id bigint references products(id) on delete set null,
         product_code text,
         product_name text,
         category text,
+        payload jsonb,
         details text not null,
         created_at timestamptz not null default now()
       );
@@ -219,6 +221,16 @@ async function main() {
     await client.query(`
       alter table inventory_activity_logs
       add column if not exists category text;
+    `);
+
+    await client.query(`
+      alter table inventory_activity_logs
+      add column if not exists import_batch_id text;
+    `);
+
+    await client.query(`
+      alter table inventory_activity_logs
+      add column if not exists payload jsonb;
     `);
 
     const username = process.env.ADMIN_USERNAME || "admin";
