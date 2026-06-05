@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import {
   jsonError,
   jsonOk,
@@ -20,10 +21,26 @@ async function handleImportProducts(request) {
     const body = await readJson(request);
     const payload = normalizeImportRequest(body);
 
-    await importProducts(payload.products, payload.importReport, payload.options);
+    const report = await importProducts(payload.products, payload.importReport, payload.options);
+
+    if (report.succeededCount === 0 && report.failedProducts.length > 0) {
+      const failureDetails = report.failedProducts
+        .map((item) => {
+          return String(item.code || "").trim() || `Row ${item.index + 1}`;
+        })
+        .join("; ");
+
+      return NextResponse.json(
+        {
+          error: failureDetails || "Unable to import products.",
+          report,
+        },
+        { status: 400 },
+      );
+    }
 
     if (!payload.returnSnapshot) {
-      return jsonOk({ ok: true });
+      return jsonOk({ ok: true, report });
     }
 
     const [updatedProducts, categories] = await Promise.all([
@@ -31,7 +48,7 @@ async function handleImportProducts(request) {
       listCategories(),
     ]);
 
-    return jsonOk({ ok: true, products: updatedProducts, categories });
+    return jsonOk({ ok: true, products: updatedProducts, categories, report });
   } catch (error) {
     return jsonError(error.message || "Unable to import products.", 400);
   }

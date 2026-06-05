@@ -958,6 +958,7 @@ export default function AdminInventoryManager({
   const [importImageFiles, setImportImageFiles] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState("");
+  const [importStatusTone, setImportStatusTone] = useState("success");
   const [isClearingProducts, setIsClearingProducts] = useState(false);
   const [isClearingOrders, setIsClearingOrders] = useState(false);
   const [catalogSourceProducts, setCatalogSourceProducts] = useState(
@@ -970,6 +971,16 @@ export default function AdminInventoryManager({
     () => readCatalogSourceFromStorage()?.title || "Crockery Product Catalog",
   );
   const requestedOrderId = searchParams.get("orderId")?.trim() || "";
+
+  function showImportStatus(message, tone = "success") {
+    setImportStatus(message);
+    setImportStatusTone(tone);
+  }
+
+  function clearImportStatus() {
+    setImportStatus("");
+    setImportStatusTone("success");
+  }
 
   useEffect(() => {
     if (catalogSourceProducts.length === 0) {
@@ -1166,7 +1177,7 @@ export default function AdminInventoryManager({
     const file = event.target.files?.[0] || null;
     setImportFile(file);
     setError("");
-    setImportStatus("");
+    clearImportStatus();
   }
 
   async function handleExcelUpload() {
@@ -1186,7 +1197,7 @@ export default function AdminInventoryManager({
 
     setIsImporting(true);
     setError("");
-    setImportStatus("");
+    clearImportStatus();
 
     try {
       let rows = [];
@@ -1263,7 +1274,7 @@ export default function AdminInventoryManager({
       }
 
       if (matchedFilesByCode.size > 0) {
-        setImportStatus(
+        showImportStatus(
           `Uploading ${matchedFilesByCode.size} matched image${matchedFilesByCode.size === 1 ? "" : "s"} to cloud storage...`,
         );
       }
@@ -1289,7 +1300,7 @@ export default function AdminInventoryManager({
       );
 
       if (matchedFilesByCode.size > 0) {
-        setImportStatus("Image upload complete. Saving product changes...");
+        showImportStatus("Image upload complete. Saving product changes...");
       }
 
       const unmatchedProducts =
@@ -1370,7 +1381,7 @@ export default function AdminInventoryManager({
         setCatalogSourceProducts(catalogProducts);
         setCatalogSourceCategories(catalogCategories);
         setCatalogSourceTitle(catalogTitleBase || "Imported Catalog");
-        setImportStatus(
+        showImportStatus(
           `Prepared ${catalogProducts.length} catalog item${catalogProducts.length === 1 ? "" : "s"} from ${importFile?.name || "the selected sheet"}.`,
         );
         setImportFile(null);
@@ -1389,6 +1400,10 @@ export default function AdminInventoryManager({
         returnSnapshot: false,
       };
       const productChunks = chunkProductsForImport(normalizedProducts, basePayload);
+      const importReportSummary = {
+        succeededCount: 0,
+        failedProducts: [],
+      };
 
       if (productChunks.length === 0) {
         throw new Error("No importable products were prepared.");
@@ -1416,6 +1431,11 @@ export default function AdminInventoryManager({
         const payload = await parseJsonResponse(response);
 
         if (!response.ok) {
+          if (payload.report && Array.isArray(payload.report.failedProducts)) {
+            importReportSummary.failedProducts.push(...payload.report.failedProducts);
+            continue;
+          }
+
           setError(
             payload.error ||
               `Import failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`,
@@ -1423,24 +1443,67 @@ export default function AdminInventoryManager({
           return;
         }
 
+        const batchReport = payload.report || {};
+        importReportSummary.succeededCount += Number(batchReport.succeededCount || 0);
+        if (Array.isArray(batchReport.failedProducts)) {
+          importReportSummary.failedProducts.push(...batchReport.failedProducts);
+        }
+
         if (productChunks.length > 1) {
-          setImportStatus(
+          showImportStatus(
             `Uploading import batch ${index + 1} of ${productChunks.length}...`,
           );
         }
       }
 
       await refreshDashboard();
+      const formatProductLabel = (product, index) => {
+        return String(product.code || "").trim() || `Row ${index + 1}`;
+      };
+      const formatFailureLabel = (item) => {
+        return String(item.code || "").trim() || `Row ${Number(item.index || 0) + 1}`;
+      };
       const unmatchedProductPreview =
         unmatchedProducts.length > 0
-          ? ` Unmatched products: ${unmatchedProducts.slice(0, 5).map((product) => product.code).join(", ")}${unmatchedProducts.length > 5 ? ` and ${unmatchedProducts.length - 5} more` : ""}.`
+          ? `Unmatched item nos: ${unmatchedProducts
+              .map((product, index) => formatProductLabel(product, index))
+              .join(", ")}.`
           : "";
       const unmatchedImagePreview =
         unmatchedImages.length > 0
-          ? ` Unmatched images: ${unmatchedImages.slice(0, 5).join(", ")}${unmatchedImages.length > 5 ? ` and ${unmatchedImages.length - 5} more` : ""}.`
+          ? `Unmatched images: ${unmatchedImages.join("; ")}.`
           : "";
-      setImportStatus(
-        `${importFile ? `Imported ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"}` : `Updated ${normalizedProducts.length} product image${normalizedProducts.length === 1 ? "" : "s"}`} successfully${importImageFiles.length > 0 ? ` with ${matchedRowCodes.size} matched image${matchedRowCodes.size === 1 ? "" : "s"}` : ""}.${unmatchedProductPreview}${unmatchedImagePreview}`,
+      const failurePreview =
+        importReportSummary.failedProducts.length > 0
+          ? `Failed item nos: ${importReportSummary.failedProducts
+              .map((item) => formatFailureLabel(item))
+              .join(", ")}.`
+          : "";
+      const successLabel = importFile
+        ? `Imported ${importReportSummary.succeededCount} of ${normalizedProducts.length} row${normalizedProducts.length === 1 ? "" : "s"}`
+        : `Updated ${importReportSummary.succeededCount} of ${normalizedProducts.length} product image${normalizedProducts.length === 1 ? "" : "s"}`;
+      const extraSuccessDetail =
+        importImageFiles.length > 0
+          ? ` with ${matchedRowCodes.size} matched image${matchedRowCodes.size === 1 ? "" : "s"}`
+          : "";
+      const statusParts = [
+        `${successLabel} successfully${extraSuccessDetail}.`,
+        unmatchedProductPreview,
+        unmatchedImagePreview,
+        failurePreview,
+      ].filter(Boolean);
+      if (importReportSummary.succeededCount === 0 && importReportSummary.failedProducts.length > 0) {
+        setError(
+          `Failed item nos: ${importReportSummary.failedProducts
+            .map((item) => formatFailureLabel(item))
+            .join(", ")}.`,
+        );
+        return;
+      }
+
+      showImportStatus(
+        statusParts.join("\n"),
+        importReportSummary.failedProducts.length > 0 ? "warning" : "success",
       );
       setCatalogSourceProducts([]);
       setCatalogSourceCategories([]);
@@ -1457,7 +1520,7 @@ export default function AdminInventoryManager({
 
   async function handleClearProducts() {
     setError("");
-    setImportStatus("");
+    clearImportStatus();
 
     if (products.length === 0) {
       setError("There are no products to clear.");
@@ -1498,7 +1561,7 @@ export default function AdminInventoryManager({
 
       setProducts(payload.products || []);
       setCategories(payload.categories || []);
-      setImportStatus(
+      showImportStatus(
         `Cleared ${payload.deletedCount || 0} product${payload.deletedCount === 1 ? "" : "s"} from inventory.`,
       );
       await refreshDashboard();
@@ -1511,7 +1574,7 @@ export default function AdminInventoryManager({
 
   async function handleClearOrders() {
     setError("");
-    setImportStatus("");
+    clearImportStatus();
     setOrderLookupError("");
 
     if (recentOrders.length === 0) {
@@ -1555,7 +1618,7 @@ export default function AdminInventoryManager({
       setInventoryLogs(payload.inventoryLogs || []);
       setLoadedOrder(null);
       setOrderLookupId("");
-      setImportStatus(
+      showImportStatus(
         `Cleared ${payload.deletedCount || 0} order${payload.deletedCount === 1 ? "" : "s"} from history.`,
       );
       await refreshDashboard();
@@ -1583,7 +1646,7 @@ export default function AdminInventoryManager({
       return Array.from(nextByCode.values());
     });
     setError("");
-    setImportStatus("");
+    clearImportStatus();
   }
 
   async function handleLogout() {
@@ -2387,7 +2450,7 @@ export default function AdminInventoryManager({
                   type="button"
                   onClick={() => {
                     setImportWorkflow("inventory");
-                    setImportStatus("");
+                    clearImportStatus();
                     setError("");
                   }}
                   className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
@@ -2402,7 +2465,7 @@ export default function AdminInventoryManager({
                   type="button"
                   onClick={() => {
                     setImportWorkflow("catalog");
-                    setImportStatus("");
+                    clearImportStatus();
                     setError("");
                   }}
                   className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
@@ -2507,7 +2570,7 @@ export default function AdminInventoryManager({
                     onClick={() => {
                       setImportFile(null);
                       setImportImageFiles([]);
-                      setImportStatus("");
+                      clearImportStatus();
                       setError("");
                     }}
                     disabled={isImporting}
@@ -2517,7 +2580,13 @@ export default function AdminInventoryManager({
                   </button>
                 </div>
                 {importStatus ? (
-                  <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  <p
+                    className={`mt-4 rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap ${
+                      importStatusTone === "warning"
+                        ? "bg-amber-50 text-amber-800"
+                        : "bg-emerald-50 text-emerald-700"
+                    }`}
+                  >
                     {importStatus}
                   </p>
                 ) : null}

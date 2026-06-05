@@ -27,6 +27,16 @@ function emptyCheckoutForm() {
   };
 }
 
+function getItemUnitPrice(item, product) {
+  const suggestedUnitPriceInr = Number(item?.customerUnitPriceInr);
+
+  if (Number.isFinite(suggestedUnitPriceInr) && suggestedUnitPriceInr >= 0) {
+    return suggestedUnitPriceInr;
+  }
+
+  return Number(product?.unitPriceInr ?? item?.unitPriceInr ?? 0);
+}
+
 function readCart() {
   if (typeof window === "undefined") {
     return [];
@@ -85,7 +95,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
     () =>
       cart.reduce((sum, item) => {
         const currentProduct = productsById.get(item.productId);
-        const unitPriceInr = Number(currentProduct?.unitPriceInr ?? item.unitPriceInr ?? 0);
+        const unitPriceInr = getItemUnitPrice(item, currentProduct);
         return sum + Number(item.quantity || 0) * unitPriceInr;
       }, 0),
     [cart, productsById],
@@ -146,6 +156,57 @@ export default function CustomerCheckout({ initialProducts = [] }) {
     writeCart(nextCart);
   }
 
+  function updateCartUnitPrice(productId, value) {
+    const rawValue = String(value ?? "").trim();
+
+    if (rawValue === "") {
+      const nextCart = cart.map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              customerUnitPriceInr: undefined,
+            }
+          : item,
+      );
+
+      setCartErrors((current) => {
+        const nextErrors = { ...current };
+        delete nextErrors[productId];
+        return nextErrors;
+      });
+      setCart(nextCart);
+      writeCart(nextCart);
+      return;
+    }
+
+    const nextUnitPriceInr = Number(rawValue);
+
+    if (!Number.isFinite(nextUnitPriceInr) || nextUnitPriceInr < 0) {
+      setCartErrors((current) => ({
+        ...current,
+        [productId]: "Unit price must be a non-negative number.",
+      }));
+      return;
+    }
+
+    const nextCart = cart.map((item) =>
+      item.productId === productId
+        ? {
+            ...item,
+            customerUnitPriceInr: nextUnitPriceInr,
+          }
+        : item,
+    );
+
+    setCartErrors((current) => {
+      const nextErrors = { ...current };
+      delete nextErrors[productId];
+      return nextErrors;
+    });
+    setCart(nextCart);
+    writeCart(nextCart);
+  }
+
   function updateCheckoutField(field, value) {
     setCheckoutForm((current) => ({
       ...current,
@@ -187,6 +248,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
           items: cart.map((item) => ({
             productId: item.productId,
             quantity: item.quantity,
+            unitPriceInr: getItemUnitPrice(item, productsById.get(item.productId)),
           })),
         }),
       });
@@ -246,7 +308,7 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                 (() => {
                   const product = productsById.get(item.productId);
                   const qtyPerCtn = product?.qtyPerCtn || item.qtyPerCtn;
-                  const unitPriceInr = Number(product?.unitPriceInr ?? item.unitPriceInr ?? 0);
+                  const unitPriceInr = getItemUnitPrice(item, product);
                   const priceUnitLabel = getPricingUnitLabel(item.productName);
                   const cartonQuantity = getStoredCartonQuantity(item);
                   const cartonPrice = getCartonPrice(unitPriceInr, qtyPerCtn);
@@ -299,7 +361,30 @@ export default function CustomerCheckout({ initialProducts = [] }) {
                             </p>
                           ) : null}
                         </div>
-                        <p className="text-base font-semibold text-green-600 sm:text-right">
+                        <div className="w-full sm:w-56">
+                          <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                            Suggested Unit Price
+                          </label>
+                          <div className="mt-2 flex items-center rounded-xl border border-orange-200 bg-white">
+                            <span className="flex h-11 shrink-0 items-center border-r border-orange-200 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-gray-500 sm:text-sm">
+                              INR
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={unitPriceInr}
+                              onChange={(event) =>
+                                updateCartUnitPrice(item.productId, event.target.value)
+                              }
+                              className="h-11 w-full min-w-0 rounded-r-xl px-3 py-2 text-base outline-none"
+                            />
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500">
+                            Leave the listed price or suggest a different amount.
+                          </p>
+                        </div>
+                        <p className="text-base font-semibold text-green-600 sm:w-28 sm:text-right">
                           {formatCurrency(unitPriceInr * item.quantity)}
                         </p>
                       </div>
