@@ -1,9 +1,10 @@
 import {
   jsonError,
   jsonOk,
+  readJson,
   requireAdmin,
 } from "../../../../../lib/api-response";
-import { deleteOrder, getOrderByOrderId } from "../../../../../lib/inventory";
+import { deleteOrder, getOrderByOrderId, updateOrder } from "../../../../../lib/inventory";
 
 export async function GET(_request, { params }) {
   return handleGetOrder(params);
@@ -11,6 +12,10 @@ export async function GET(_request, { params }) {
 
 export async function DELETE(_request, { params }) {
   return handleDeleteOrder(params);
+}
+
+export async function PATCH(request, { params }) {
+  return handleUpdateOrder(request, params);
 }
 
 async function handleGetOrder(params) {
@@ -45,6 +50,22 @@ async function handleDeleteOrder(params) {
     return jsonOk({ ok: true, ...result });
   } catch (error) {
     return jsonError(error.message || "Unable to delete order.", 400);
+  }
+}
+
+async function handleUpdateOrder(request, params) {
+  const unauthorizedResponse = await requireAdmin();
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
+  try {
+    const body = await readJson(request, {});
+    const orderId = await readOrderId(params);
+    const order = await updateOrder(orderId, body);
+    return jsonOk({ order });
+  } catch (error) {
+    return jsonError(error.message || "Unable to update order.", 400);
   }
 }
 

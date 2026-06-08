@@ -58,6 +58,17 @@ function calculateOrderTotal(items = []) {
   );
 }
 
+function cloneOrderForEditing(order) {
+  if (!order) {
+    return null;
+  }
+
+  return {
+    ...order,
+    items: Array.isArray(order.items) ? order.items.map((item) => ({ ...item })) : [],
+  };
+}
+
 function normalizeCodeKey(value) {
   return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
 }
@@ -442,6 +453,7 @@ function getLogTone(action) {
     action === "stock_deducted_from_order" ||
     action === "stock_restored_from_order" ||
     action === "order_confirmed" ||
+    action === "order_updated" ||
     action === "order_reversed" ||
     action === "order_deleted" ||
     action === "orders_restocked_before_clear" ||
@@ -476,6 +488,7 @@ function getLogLabel(action) {
     stock_deducted_from_order: "Stock Deducted",
     stock_restored_from_order: "Stock Restored",
     order_confirmed: "Order Confirmed",
+    order_updated: "Order Updated",
     order_reversed: "Order Reversed",
     order_deleted: "Order Deleted",
     inventory_import_summary: "Import Summary",
@@ -1236,7 +1249,12 @@ export default function AdminInventoryManager({
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
   const [isReversingOrder, setIsReversingOrder] = useState(false);
   const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [isEditingOrder, setIsEditingOrder] = useState(false);
+  const [isSavingOrderEdit, setIsSavingOrderEdit] = useState(false);
   const [loadedOrder, setLoadedOrder] = useState(null);
+  const [orderDraft, setOrderDraft] = useState(null);
+  const [orderDraftItemProductId, setOrderDraftItemProductId] = useState("");
+  const [orderDraftItemQuantity, setOrderDraftItemQuantity] = useState("1");
   const [importWorkflow, setImportWorkflow] = useState("inventory");
   const [importFile, setImportFile] = useState(null);
   const [importImageFiles, setImportImageFiles] = useState([]);
@@ -1248,6 +1266,11 @@ export default function AdminInventoryManager({
   const [catalogSourceProducts, setCatalogSourceProducts] = useState(
     () => readCatalogSourceFromStorage()?.products || [],
   );
+  const productsById = useMemo(
+    () => new Map(products.map((product) => [Number(product.id), product])),
+    [products],
+  );
+  const activeOrder = isEditingOrder ? orderDraft : loadedOrder;
   const [catalogSourceCategories, setCatalogSourceCategories] = useState(
     () => readCatalogSourceFromStorage()?.categories || [],
   );
@@ -2004,16 +2027,247 @@ export default function AdminInventoryManager({
       if (!response.ok) {
         setOrderLookupError(payload.error || "Unable to fetch order.");
         setLoadedOrder(null);
+        setOrderDraft(null);
+        setIsEditingOrder(false);
         return;
       }
 
       setLoadedOrder(payload.order);
+      setOrderDraft(null);
+      setIsEditingOrder(false);
       setOrderLookupId(payload.order.orderId || normalizedOrderId);
     } catch {
       setOrderLookupError("Unable to fetch order.");
       setLoadedOrder(null);
+      setOrderDraft(null);
+      setIsEditingOrder(false);
     } finally {
       setIsLoadingOrder(false);
+    }
+  }
+
+  function startEditingLoadedOrder() {
+    if (!loadedOrder) {
+      return;
+    }
+
+    setOrderDraft(cloneOrderForEditing(loadedOrder));
+    setOrderDraftItemProductId("");
+    setOrderDraftItemQuantity("1");
+    setIsEditingOrder(true);
+    setOrderLookupError("");
+  }
+
+  function cancelEditingLoadedOrder() {
+    setOrderDraft(null);
+    setOrderDraftItemProductId("");
+    setOrderDraftItemQuantity("1");
+    setIsEditingOrder(false);
+    setOrderLookupError("");
+  }
+
+  function updateOrderItemInState(setOrderState, productId, updater) {
+    setOrderState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const items = current.items.map((item) => {
+        if (Number(item.productId) !== Number(productId)) {
+          return item;
+        }
+
+        return updater(item);
+      });
+
+      return {
+        ...current,
+        items,
+      };
+    });
+  }
+
+  function updateLoadedOrderUnitPrice(productId, nextValue) {
+    updateOrderItemInState(setLoadedOrder, productId, (item) => {
+      const unitPriceInr = nextValue === "" ? "" : Number(nextValue);
+      const safeUnitPrice = unitPriceInr === "" || Number.isNaN(unitPriceInr) ? 0 : unitPriceInr;
+
+      return {
+        ...item,
+        unitPriceInr,
+        lineTotalInr: Number(item.quantity) * safeUnitPrice,
+      };
+    });
+  }
+
+  function updateDraftOrderUnitPrice(productId, nextValue) {
+    updateOrderItemInState(setOrderDraft, productId, (item) => {
+      const unitPriceInr = nextValue === "" ? "" : Number(nextValue);
+      const safeUnitPrice = unitPriceInr === "" || Number.isNaN(unitPriceInr) ? 0 : unitPriceInr;
+
+      return {
+        ...item,
+        unitPriceInr,
+        lineTotalInr: Number(item.quantity) * safeUnitPrice,
+      };
+    });
+  }
+
+  function updateDraftOrderQuantity(productId, nextValue) {
+    updateOrderItemInState(setOrderDraft, productId, (item) => {
+      const quantity = nextValue === "" ? "" : Number(nextValue);
+      const safeQuantity = quantity === "" || Number.isNaN(quantity) ? 0 : quantity;
+
+      return {
+        ...item,
+        quantity,
+        lineTotalInr: safeQuantity * Number(item.unitPriceInr || 0),
+      };
+    });
+  }
+
+  function removeDraftOrderItem(productId) {
+    setOrderDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        items: current.items.filter((item) => Number(item.productId) !== Number(productId)),
+      };
+    });
+  }
+
+  function addDraftOrderItem() {
+    if (!orderDraft) {
+      return;
+    }
+
+    const productId = Number(orderDraftItemProductId);
+    const quantity = Number(orderDraftItemQuantity);
+
+    if (!Number.isFinite(productId)) {
+      setOrderLookupError("Select a product to add.");
+      return;
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setOrderLookupError("Quantity must be greater than zero.");
+      return;
+    }
+
+    const product = productsById.get(productId);
+
+    if (!product) {
+      setOrderLookupError("The selected product no longer exists.");
+      return;
+    }
+
+    setOrderDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const existingItem = current.items.find((item) => Number(item.productId) === productId);
+      const nextItems = existingItem
+        ? current.items.map((item) => {
+            if (Number(item.productId) !== productId) {
+              return item;
+            }
+
+            const nextQuantity = Number(item.quantity || 0) + quantity;
+            return {
+              ...item,
+              quantity: nextQuantity,
+              lineTotalInr: nextQuantity * Number(item.unitPriceInr || product.unitPriceInr || 0),
+            };
+          })
+        : [
+            ...current.items,
+            {
+              id: `new-${productId}`,
+              productId,
+              productCode: product.code,
+              productName: product.name,
+              category: product.category || "",
+              ctn: product.ctn || "",
+              qtyPerCtn: product.qtyPerCtn || "",
+              imageUrl: product.imageUrl || "",
+              quantity,
+              unitPriceInr: Number(product.unitPriceInr || 0),
+              lineTotalInr: quantity * Number(product.unitPriceInr || 0),
+            },
+          ];
+
+      return {
+        ...current,
+        items: nextItems,
+      };
+    });
+
+    setOrderDraftItemProductId("");
+    setOrderDraftItemQuantity("1");
+  }
+
+  async function saveLoadedOrderEdits() {
+    if (!orderDraft?.orderId) {
+      return;
+    }
+
+    const normalizedItems = orderDraft.items.map((item) => ({
+      productId: Number(item.productId),
+      quantity: Number(item.quantity),
+      unitPriceInr: Number(item.unitPriceInr),
+    }));
+
+    if (normalizedItems.length === 0) {
+      setOrderLookupError("Add at least one item before saving.");
+      return;
+    }
+
+    if (
+      normalizedItems.some(
+        (item) =>
+          !Number.isFinite(item.productId) ||
+          !Number.isFinite(item.quantity) ||
+          item.quantity <= 0 ||
+          !Number.isFinite(item.unitPriceInr) ||
+          item.unitPriceInr < 0,
+      )
+    ) {
+      setOrderLookupError("Check every item quantity and price before saving.");
+      return;
+    }
+
+    setIsSavingOrderEdit(true);
+    setOrderLookupError("");
+
+    try {
+      const response = await fetch(`/api/admin/orders/${orderDraft.orderId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ items: normalizedItems }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setOrderLookupError(payload.error || "Unable to update order.");
+        return;
+      }
+
+      setLoadedOrder(payload.order);
+      setOrderDraft(null);
+      setIsEditingOrder(false);
+      setOrderDraftItemProductId("");
+      setOrderDraftItemQuantity("1");
+      await refreshDashboard();
+    } catch {
+      setOrderLookupError("Unable to update order.");
+    } finally {
+      setIsSavingOrderEdit(false);
     }
   }
 
@@ -2029,35 +2283,6 @@ export default function AdminInventoryManager({
     setOrderLookupId(requestedOrderId);
     fetchOrderDetails(requestedOrderId);
   }, [activeSection, loadedOrder?.orderId, requestedOrderId]);
-
-  function updateLoadedOrderUnitPrice(itemId, nextValue) {
-    setLoadedOrder((current) => {
-      if (!current) {
-        return current;
-      }
-
-      const items = current.items.map((item) => {
-        if (item.id !== itemId) {
-          return item;
-        }
-
-        const unitPriceInr = nextValue === "" ? "" : Number(nextValue);
-        const safeUnitPrice = unitPriceInr === "" || Number.isNaN(unitPriceInr) ? 0 : unitPriceInr;
-
-        return {
-          ...item,
-          unitPriceInr,
-          lineTotalInr: Number(item.quantity) * safeUnitPrice,
-        };
-      });
-
-      return {
-        ...current,
-        items,
-        totalAmountInr: calculateOrderTotal(items),
-      };
-    });
-  }
 
   async function confirmLoadedOrder() {
     if (!loadedOrder?.orderId) {
@@ -2598,37 +2823,78 @@ export default function AdminInventoryManager({
                 </p>
               ) : null}
 
-              {loadedOrder ? (
+              {activeOrder ? (
                 <div className="mt-6 rounded-3xl border border-orange-100 bg-orange-50 p-6">
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div>
                       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-600">
-                        {loadedOrder.orderId}
+                        {activeOrder.orderId}
                       </p>
-                      <h4 className="mt-2 text-2xl font-bold">{loadedOrder.customerName}</h4>
+                      <h4 className="mt-2 text-2xl font-bold">{activeOrder.customerName}</h4>
                       <p className="mt-1 text-gray-600">
-                        Phone: {loadedOrder.customerPhone || "Not provided"}
+                        Phone: {activeOrder.customerPhone || "Not provided"}
                       </p>
                       <p className="mt-1 text-gray-600">
-                        Status: {loadedOrder.status} | Payment: {loadedOrder.paymentStatus}
+                        Status: {activeOrder.status} | Payment: {activeOrder.paymentStatus}
                       </p>
-                      {loadedOrder.notes ? (
-                        <p className="mt-2 text-gray-600">Notes: {loadedOrder.notes}</p>
+                      {activeOrder.notes ? (
+                        <p className="mt-2 text-gray-600">Notes: {activeOrder.notes}</p>
                       ) : null}
                     </div>
 
                     <div className="text-right">
                       <p className="text-sm text-gray-500">Order Total</p>
                       <p className="text-3xl font-bold text-green-700">
-                        {formatCurrency(loadedOrder.totalAmountInr)}
+                        {formatCurrency(calculateOrderTotal(activeOrder.items))}
                       </p>
                     </div>
                   </div>
 
+                  {isEditingOrder ? (
+                    <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">
+                        Edit Items
+                      </p>
+                      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_160px_auto]">
+                        <select
+                          value={orderDraftItemProductId}
+                          onChange={(event) => setOrderDraftItemProductId(event.target.value)}
+                          className="rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        >
+                          <option value="">Select a product to add</option>
+                          {products.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.code} - {product.name} (stock {product.stockQuantity})
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={orderDraftItemQuantity}
+                          onChange={(event) => setOrderDraftItemQuantity(event.target.value)}
+                          className="rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={addDraftOrderItem}
+                          disabled={isSavingOrderEdit}
+                          className="rounded-2xl bg-amber-600 px-5 py-3 font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                        >
+                          Add Item
+                        </button>
+                      </div>
+                      <p className="mt-3 text-sm text-amber-900/80">
+                        Add a product, change quantities, or remove lines. Confirmed orders keep item prices locked unless you reverse them first.
+                      </p>
+                    </div>
+                  ) : null}
+
                   <div className="mt-6 space-y-3">
-                    {loadedOrder.items.map((item) => (
+                    {activeOrder.items.map((item) => (
                       <div
-                        key={`${loadedOrder.orderId}-${item.productId}`}
+                        key={`${activeOrder.orderId}-${item.productId}`}
                         className="flex flex-col gap-4 rounded-2xl bg-white p-4 md:flex-row md:items-center md:justify-between"
                       >
                         <div>
@@ -2636,7 +2902,26 @@ export default function AdminInventoryManager({
                           <p className="text-sm text-gray-500">{item.productCode}</p>
                         </div>
                         <div className="flex items-center gap-4 md:gap-6">
-                          <div className="text-sm text-gray-500">Qty {item.quantity}</div>
+                          {isEditingOrder ? (
+                            <label className="block">
+                              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                                Quantity
+                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  updateDraftOrderQuantity(item.productId, event.target.value)
+                                }
+                                disabled={isSavingOrderEdit}
+                                className="mt-2 w-24 rounded-xl border border-stone-200 px-3 py-2 text-right text-sm text-stone-900 disabled:bg-stone-100"
+                              />
+                            </label>
+                          ) : (
+                            <div className="text-sm text-gray-500">Qty {item.quantity}</div>
+                          )}
                           <label className="block">
                             <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
                               Unit Price
@@ -2647,21 +2932,34 @@ export default function AdminInventoryManager({
                               step="1"
                               value={item.unitPriceInr}
                               onChange={(event) =>
-                                updateLoadedOrderUnitPrice(item.id, event.target.value)
+                                (isEditingOrder
+                                  ? updateDraftOrderUnitPrice(item.productId, event.target.value)
+                                  : updateLoadedOrderUnitPrice(item.productId, event.target.value))
                               }
                               disabled={
-                                loadedOrder.status === "confirmed" ||
+                                activeOrder.status === "confirmed" ||
                                 isConfirmingOrder ||
                                 isReversingOrder ||
-                                isDeletingOrder
+                                isDeletingOrder ||
+                                isSavingOrderEdit
                               }
                               className="mt-2 w-32 rounded-xl border border-stone-200 px-3 py-2 text-right text-sm text-stone-900 disabled:bg-stone-100"
                             />
                           </label>
+                          {isEditingOrder ? (
+                            <button
+                              type="button"
+                              onClick={() => removeDraftOrderItem(item.productId)}
+                              disabled={isSavingOrderEdit}
+                              className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                            >
+                              Remove
+                            </button>
+                          ) : null}
                           <div className="text-right">
                             <p className="text-sm text-gray-500">Line Total</p>
                             <p className="font-semibold text-gray-900">
-                              {formatCurrency(item.lineTotalInr)}
+                              {formatCurrency(Number(item.quantity || 0) * Number(item.unitPriceInr || 0))}
                             </p>
                           </div>
                         </div>
@@ -2670,6 +2968,40 @@ export default function AdminInventoryManager({
                   </div>
 
                   <div className="mt-6 flex flex-wrap gap-3">
+                    {!isEditingOrder ? (
+                      <button
+                        type="button"
+                        onClick={startEditingLoadedOrder}
+                        disabled={
+                          isConfirmingOrder ||
+                          isReversingOrder ||
+                          isDeletingOrder ||
+                          isSavingOrderEdit
+                        }
+                        className="rounded-2xl border border-amber-300 bg-amber-50 px-6 py-3 font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                      >
+                        Edit Items
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={saveLoadedOrderEdits}
+                          disabled={isSavingOrderEdit}
+                          className="rounded-2xl bg-amber-600 px-6 py-3 font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                        >
+                          {isSavingOrderEdit ? "Saving..." : "Save Item Changes"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEditingLoadedOrder}
+                          disabled={isSavingOrderEdit}
+                          className="rounded-2xl border border-stone-300 bg-white px-6 py-3 font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={confirmLoadedOrder}
@@ -2677,11 +3009,13 @@ export default function AdminInventoryManager({
                         isConfirmingOrder ||
                         isReversingOrder ||
                         isDeletingOrder ||
-                        loadedOrder.status === "confirmed"
+                        isSavingOrderEdit ||
+                        isEditingOrder ||
+                        activeOrder.status === "confirmed"
                       }
                       className="rounded-2xl bg-green-600 px-6 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
                     >
-                      {loadedOrder.status === "confirmed"
+                      {activeOrder.status === "confirmed"
                         ? "Order Already Confirmed"
                         : isConfirmingOrder
                           ? "Confirming..."
@@ -2694,7 +3028,9 @@ export default function AdminInventoryManager({
                         isConfirmingOrder ||
                         isReversingOrder ||
                         isDeletingOrder ||
-                        loadedOrder.status !== "confirmed"
+                        isSavingOrderEdit ||
+                        isEditingOrder ||
+                        activeOrder.status !== "confirmed"
                       }
                       className="rounded-2xl border border-amber-300 bg-amber-50 px-6 py-3 font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
                     >
@@ -2703,18 +3039,28 @@ export default function AdminInventoryManager({
                     <button
                       type="button"
                       onClick={deleteLoadedOrder}
-                      disabled={isConfirmingOrder || isReversingOrder || isDeletingOrder}
+                      disabled={
+                        isConfirmingOrder ||
+                        isReversingOrder ||
+                        isDeletingOrder ||
+                        isSavingOrderEdit ||
+                        isEditingOrder
+                      }
                       className="rounded-2xl border border-red-300 bg-red-50 px-6 py-3 font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
                     >
                       {isDeletingOrder ? "Deleting..." : "Delete Order"}
                     </button>
-                    {loadedOrder.status === "confirmed" ? (
+                    {activeOrder.status === "confirmed" ? (
                       <button
                         type="button"
-                        onClick={() =>
-                          openOrderReceiptWindow(loadedOrder.orderId, { autoPrint: true })
+                        onClick={() => openOrderReceiptWindow(activeOrder.orderId, { autoPrint: true })}
+                        disabled={
+                          isConfirmingOrder ||
+                          isReversingOrder ||
+                          isDeletingOrder ||
+                          isSavingOrderEdit ||
+                          isEditingOrder
                         }
-                        disabled={isConfirmingOrder || isReversingOrder || isDeletingOrder}
                         className="rounded-2xl border border-stone-300 bg-white px-6 py-3 font-semibold text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
                       >
                         Print / Save Receipt PDF
@@ -2723,7 +3069,9 @@ export default function AdminInventoryManager({
                   </div>
 
                   <p className="mt-3 text-sm text-gray-500">
-                    Confirmed orders are locked for price edits until you reverse them. Deleting a confirmed order restores its stock first. A printable receipt opens right after confirmation, and you can re-open it here anytime.
+                    {isEditingOrder
+                      ? "Save changes to update quantities, add products, or remove items. Confirmed orders keep prices locked while editing."
+                      : "Confirmed orders are locked for price edits until you reverse them. Deleting a confirmed order restores its stock first. A printable receipt opens right after confirmation, and you can re-open it here anytime."}
                   </p>
                 </div>
               ) : null}
