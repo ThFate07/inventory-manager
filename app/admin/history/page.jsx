@@ -15,7 +15,7 @@ export default async function AdminHistoryPage() {
   }
 
   const { products, categories, recentOrders, inventoryLogs } =
-    await getAdminDashboardSnapshot();
+    await getAdminDashboardSnapshot({ orderLimit: null });
 
   return (
     <AdminInventoryManager
